@@ -21,7 +21,7 @@ from parcels import (FieldSet, ParticleSet, JITParticle, Variable,
 # =====================================================================
 # CONFIG — ここだけ自分の環境に合わせて編集
 # =====================================================================
-GLORYS_FILE = "REPLACE_ME_glorys.nc"   # DL済み GLORYS12V1 NetCDF のパス
+GLORYS_FILE = "raw/glorys_2018_2022_surface_uovo.nc"   # DL済み GLORYS12V1 NetCDF のパス
 VAR_U, VAR_V = "uo", "vo"              # 表層東西/南北流速の変数名 (GLORYS 既定)
 DIM_LON, DIM_LAT = "longitude", "latitude"   # 座標名 (GLORYS 既定)
 DIM_TIME, DIM_DEPTH = "time", "depth"        # depth が無ければ None にする
@@ -29,7 +29,7 @@ DIM_TIME, DIM_DEPTH = "time", "depth"        # depth が無ければ None にす
 RUNTIME_DAYS = 90      # 追跡日数 (本番: 90日)
 DT_MIN       = 30      # 移流タイムステップ(分)
 OUTPUT_DT_H  = 24      # 軌跡を何時間ごとに保存するか
-N_PER_SITE   = 50      # 1放流地点あたりの粒子数 (本番: 50)
+N_PER_SITE   = 500      # 1放流地点あたりの粒子数 (本番: 50)
 JITTER_DEG   = 0.05    # 各地点まわりに粒子を散らす幅(度)
 GRID_N       = 128     # 密度マップの解像度 (最終的な NN 入出力に合わせる)
 OUT_ZARR     = "trace_run.zarr"
@@ -37,7 +37,7 @@ OUT_ZARR     = "trace_run.zarr"
 # 放流地点: gen_release_sites.py が出力した CSV から読み込む
 # (陸マス上の点は自動生成の時点で既に除外済みなので、ここでの
 #  陸判定スキップはほぼ発生しないはず)
-RELEASE_SITES_CSV = "release_sites.csv"   # gen_release_sites.py の --out と合わせる
+RELEASE_SITES_CSV = "release_sites_test30.csv"   # gen_release_sites.py の --out と合わせる
 
 import pandas as pd
 _sites_df = pd.read_csv(RELEASE_SITES_CSV)
@@ -180,12 +180,14 @@ n_sites = len(RELEASE_SITES)
 maps_all   = np.zeros((n_sites, GRID_N, GRID_N), dtype=np.float32)
 maps_beach = np.zeros((n_sites, GRID_N, GRID_N), dtype=np.float32)
 beach_frac_by_site = np.zeros(n_sites, dtype=np.float32)
+n_particles_by_site = np.zeros(n_sites, dtype=np.int32)
 
 for k in range(n_sites):
     sel = (origin == k)
     n_k = sel.sum()
+    n_particles_by_site[k] = n_k
     if n_k == 0:
-        continue  # 陸判定でスキップされた地点はゼロ埋めのまま
+        continue  # 陸判定でスキップされた地点(release時に弾かれた)。ゼロ埋めのまま
 
     Ha, _, _ = np.histogram2d(flon[sel], flat[sel], bins=[gx, gy])
     Ha = Ha.T
@@ -214,8 +216,24 @@ print(f"    saved density_maps_all.npy / density_maps_beach.npy  "
 print(f"    mean beached fraction across sites: {beach_frac_by_site.mean():.2f}")
 print(f"    sites with zero beached particles : {(beach_frac_by_site == 0).sum()} / {n_sites}")
 
-# 目視用に origin 0 だけ従来通りの単発チェックにも使う
-H = maps_all[0]
+empty_origins = np.where(n_particles_by_site == 0)[0]
+if len(empty_origins) > 0:
+    print(f"    !! 粒子ゼロのorigin(陸判定でskip等) {len(empty_origins)}件: "
+          f"{list(empty_origins[:10])}{' ...' if len(empty_origins) > 10 else ''}")
+
+# 目視用のorigin: origin 0 が空なら、実際に粒子＆漂着があるものを自動選択する
+# (origin 0 固定だと land-skip 発生時にグラフが常に真っ暗になり気づきにくいため)
+candidates = np.where((n_particles_by_site > 0) & (beach_frac_by_site > 0))[0]
+if len(candidates) > 0:
+    plot_origin = int(candidates[0])
+elif np.any(n_particles_by_site > 0):
+    plot_origin = int(np.where(n_particles_by_site > 0)[0][0])
+    print(f"    (origin {plot_origin} は粒子はあるが漂着ゼロ。all側のみ意味を持つ)")
+else:
+    plot_origin = None
+    print("    !! 全origin粒子ゼロ。放流点が全滅している可能性大 — 上流の land mask 判定を要確認")
+
+H = maps_all[plot_origin] if plot_origin is not None else np.zeros((GRID_N, GRID_N))
 
 # =====================================================================
 # 7. 合否チェック — ここが全部 OK なら本番バッチへ進んでよい
@@ -227,8 +245,9 @@ print(f"particles           : {plon.size}")
 print(f"beached fraction(全体) : {beached.mean():.2f}   (0や1に張り付いてたら要注意)")
 print(f"mean displacement    : {np.nanmean(disp):.3f} deg  (>0 でないと移流できてない)")
 print(f"max  displacement    : {np.nanmax(disp):.3f} deg")
-print(f"density map sum(org0,all)   : {maps_all[0].sum():.3f}   (1.0 なら正規化OK)")
-print(f"density map sum(org0,beach) : {maps_beach[0].sum():.3f}   (漂着0件なら0.0のまま)")
+if plot_origin is not None:
+    print(f"density map sum(origin={plot_origin},all)   : {maps_all[plot_origin].sum():.3f}   (1.0 なら正規化OK)")
+    print(f"density map sum(origin={plot_origin},beach) : {maps_beach[plot_origin].sum():.3f}   (漂着0件なら0.0のまま)")
 if np.nanmean(disp) < 1e-3:
     print("  !! ほぼ動いてない → 変数名/放流点が陸/時間範囲を疑う")
 if beached.mean() > 0.99:
@@ -237,21 +256,26 @@ if (beach_frac_by_site == 0).sum() > n_sites * 0.3:
     print("  !! 3割超のoriginで漂着ゼロ → RUNTIME_DAYSを延ばすか、beaching判定を確認")
 print("======================")
 
-# 任意: origin 0 の all/beach 比較プロット
+# 任意: 実際に粒子のあるoriginでの all/beach 比較プロット
 try:
+    if plot_origin is None:
+        raise RuntimeError("有効なoriginが無いためプロットをスキップ")
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, axes = plt.subplots(1, 2, figsize=(11, 5))
     for ax, Hshow, title in zip(
-            axes, [maps_all[0], maps_beach[0]],
+            axes, [maps_all[plot_origin], maps_beach[plot_origin]],
             ["all particles (incl. drifting)", "beached only"]):
-        ax.pcolormesh(gx[:-1], gy[:-1], Hshow, shading="auto")
-        ax.scatter(RELEASE_SITES[0][0], RELEASE_SITES[0][1], c="r", marker="*", s=120)
+        mesh = ax.pcolormesh(gx[:-1], gy[:-1], Hshow, shading="auto", vmin=0)
+        ax.scatter(RELEASE_SITES[plot_origin][0], RELEASE_SITES[plot_origin][1],
+                   c="r", marker="*", s=120, edgecolors="white", linewidths=0.8)
         ax.set_title(title)
-    plt.suptitle("origin 0: all vs. beached-only density")
+        fig.colorbar(mesh, ax=ax, shrink=0.8)
+    plt.suptitle(f"origin {plot_origin} (n_particles={n_particles_by_site[plot_origin]}): "
+                f"all vs. beached-only density")
     plt.tight_layout()
-    plt.savefig("density_origin0_all_vs_beach.png", dpi=110)
-    print("saved density_origin0_all_vs_beach.png")
+    plt.savefig("density_origin_check.png", dpi=110)
+    print(f"saved density_origin_check.png (origin={plot_origin})")
 except Exception as e:
     print("plot skipped:", e)

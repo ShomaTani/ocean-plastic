@@ -5,7 +5,7 @@ GLORYS の land mask から海陸境界セル(=沿岸の海セル)を抽出し�
 必ず海セル上に落ちる放流点リストを作る。
 
 使い方:
-  python gen_release_sites.py <ncファイル> --n_sites 300 --out release_sites.csv
+  python gen_release_sites.py <ncファイル> --n_sites 300 --out data/release_sites.csv
 """
 import argparse
 import numpy as np

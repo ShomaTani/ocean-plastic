@@ -1,3 +1,4 @@
+
 """
 TRACE — 小規模疎通テスト (10地点 × 10粒子 × 30日)
 素の OceanParcels (parcels 3.x) で CMEMS GLORYS12V1 を直読み。
@@ -29,7 +30,7 @@ DIM_TIME, DIM_DEPTH = "time", "depth"        # depth が無ければ None にす
 RUNTIME_DAYS = 90      # 追跡日数 (本番: 90日)
 DT_MIN       = 30      # 移流タイムステップ(分)
 OUTPUT_DT_H  = 24      # 軌跡を何時間ごとに保存するか
-N_PER_SITE   = 500      # 1放流地点あたりの粒子数 (本番: 50)
+N_PER_SITE   = 50      # 1放流地点あたりの粒子数 (本番: 50)
 JITTER_DEG   = 0.05    # 各地点まわりに粒子を散らす幅(度)
 GRID_N       = 128     # 密度マップの解像度 (最終的な NN 入出力に合わせる)
 OUT_ZARR     = "trace_run.zarr"
@@ -37,7 +38,7 @@ OUT_ZARR     = "trace_run.zarr"
 # 放流地点: gen_release_sites.py が出力した CSV から読み込む
 # (陸マス上の点は自動生成の時点で既に除外済みなので、ここでの
 #  陸判定スキップはほぼ発生しないはず)
-RELEASE_SITES_CSV = "release_sites_test30.csv"   # gen_release_sites.py の --out と合わせる
+RELEASE_SITES_CSV = "release_sites.csv"   # gen_release_sites.py の --out と合わせる
 
 import pandas as pd
 _sites_df = pd.read_csv(RELEASE_SITES_CSV)
@@ -94,33 +95,54 @@ def nearest(arr, v):
 
 rng = np.random.default_rng(0)
 plon, plat, porigin = [], [], []
+n_resampled_total = 0
 for k, (lo, la) in enumerate(RELEASE_SITES):
     j, i = nearest(lats, la), nearest(lons, lo)
     if land[j, i] > 0.5:
         print(f"    ! site {k} ({lo},{la}) is on land — skipped")
         continue
-    plon += list(lo + rng.uniform(-JITTER_DEG, JITTER_DEG, N_PER_SITE))
-    plat += list(la + rng.uniform(-JITTER_DEG, JITTER_DEG, N_PER_SITE))
-    porigin += [k] * N_PER_SITE
+    # ジッタ後の座標が陸に落ちていないか1粒子ずつ検証する。
+    # (地点の中心座標だけ陸判定しても、ジッタ(JITTER_DEG)がグリッド1マス分
+    #  近いため、ジッタ後に隣の陸セルへ飛んでしまうケースがあるため)
+    n_ok = 0
+    n_try = 0
+    max_try = N_PER_SITE * 20  # 無限ループ防止
+    while n_ok < N_PER_SITE and n_try < max_try:
+        jlo = lo + rng.uniform(-JITTER_DEG, JITTER_DEG)
+        jla = la + rng.uniform(-JITTER_DEG, JITTER_DEG)
+        jj, ji = nearest(lats, jla), nearest(lons, jlo)
+        n_try += 1
+        if land[jj, ji] > 0.5:
+            n_resampled_total += 1
+            continue  # 陸に落ちた → 破棄して再サンプリング
+        plon.append(jlo); plat.append(jla); porigin.append(k)
+        n_ok += 1
+    if n_ok < N_PER_SITE:
+        print(f"    ! site {k}: {N_PER_SITE - n_ok}粒子が{max_try}回試行後も海に置けず断念"
+              f"(狭い入り江等の可能性)")
 plon = np.array(plon); plat = np.array(plat); porigin = np.array(porigin, np.int32)
 print(f"[3] releasing {plon.size} particles from {len(set(porigin))} ocean sites")
+if n_resampled_total > 0:
+    print(f"    (ジッタが陸に落ちて再サンプリングした回数: {n_resampled_total} "
+          f"— これが多いほど、修正前は誤beachingが多かったはず)")
 
 # =====================================================================
 # 4. 粒子クラス + カーネル (合成フィールドで検証済み)
 # =====================================================================
 class Plastic(JITParticle):
-    beached  = Variable("beached",  dtype=np.int32,   initial=0)
-    prev_lon = Variable("prev_lon", dtype=np.float32, initial=0.)
-    prev_lat = Variable("prev_lat", dtype=np.float32, initial=0.)
-    origin   = Variable("origin",   dtype=np.int32,   initial=0, to_write="once")
+    beached     = Variable("beached",     dtype=np.int32,   initial=0)  # 陸マスクに接触=本当の漂着
+    left_domain = Variable("left_domain", dtype=np.int32,   initial=0)  # 領域外に出て追跡不能
+    prev_lon    = Variable("prev_lon",    dtype=np.float32, initial=0.)
+    prev_lat    = Variable("prev_lat",    dtype=np.float32, initial=0.)
+    origin      = Variable("origin",      dtype=np.int32,   initial=0, to_write="once")
 
 def StorePrev(particle, fieldset, time):
-    if particle.beached == 0:
+    if particle.beached == 0 and particle.left_domain == 0:
         particle.prev_lon = particle.lon
         particle.prev_lat = particle.lat
 
-def AdvectBeach(particle, fieldset, time):          # 漂着済みは動かさない RK4
-    if particle.beached == 0:
+def AdvectBeach(particle, fieldset, time):          # 漂着済み/領域外は動かさない RK4
+    if particle.beached == 0 and particle.left_domain == 0:
         (u1, v1) = fieldset.UV[time, particle.depth, particle.lat, particle.lon, particle]
         lon1, lat1 = (particle.lon + u1*.5*particle.dt, particle.lat + v1*.5*particle.dt)
         (u2, v2) = fieldset.UV[time + .5*particle.dt, particle.depth, lat1, lon1, particle]
@@ -131,19 +153,21 @@ def AdvectBeach(particle, fieldset, time):          # 漂着済みは動かさ�
         particle_dlon += (u1 + 2*u2 + 2*u3 + u4) / 6. * particle.dt
         particle_dlat += (v1 + 2*v2 + 2*v3 + v4) / 6. * particle.dt
 
-def BeachOnLand(particle, fieldset, time):          # 陸セルに入ったら直前位置で漂着
-    if particle.beached == 0:
+def BeachOnLand(particle, fieldset, time):          # 陸セルに入ったら直前位置で漂着(本物の漂着)
+    if particle.beached == 0 and particle.left_domain == 0:
         if fieldset.landmask[time, particle.depth, particle.lat, particle.lon] > 0.5:
             particle.lon = particle.prev_lon
             particle.lat = particle.prev_lat
             particle.beached = 1
 
-def Recover(particle, fieldset, time):              # 領域外/補間エラーも漂着扱いで救済
+def Recover(particle, fieldset, time):
+    # 領域外に出た/補間エラー = 「追跡不能」であって「漂着」ではないので
+    # beached とは別のフラグ(left_domain)に立てる。密度マップの集計から除外するため。
     if (particle.state == StatusCode.ErrorOutOfBounds or
             particle.state == StatusCode.ErrorInterpolation):
         particle.lon = particle.prev_lon
         particle.lat = particle.prev_lat
-        particle.beached = 1
+        particle.left_domain = 1
         particle.state = StatusCode.Success
 
 # =====================================================================
@@ -170,8 +194,13 @@ print("[6] building per-origin density maps (all & beached-only) ...")
 ds = xr.open_zarr(OUT_ZARR)
 flon = ds.lon.isel(obs=-1).values
 flat = ds.lat.isel(obs=-1).values
-beached = ds.beached.isel(obs=-1).values
-origin  = ds.origin.values
+beached     = ds.beached.isel(obs=-1).values
+left_domain = ds.left_domain.isel(obs=-1).values
+origin      = ds.origin.values
+
+# 領域外に出た粒子(left_domain==1)は「境界で凍結された位置」であって物理的な
+# 意味を持たないため、all/beach 両方の密度マップから除外する。
+in_domain = (left_domain == 0)
 
 gx = np.linspace(float(lons.min()), float(lons.max()), GRID_N + 1)
 gy = np.linspace(float(lats.min()), float(lats.max()), GRID_N + 1)
@@ -179,7 +208,8 @@ gy = np.linspace(float(lats.min()), float(lats.max()), GRID_N + 1)
 n_sites = len(RELEASE_SITES)
 maps_all   = np.zeros((n_sites, GRID_N, GRID_N), dtype=np.float32)
 maps_beach = np.zeros((n_sites, GRID_N, GRID_N), dtype=np.float32)
-beach_frac_by_site = np.zeros(n_sites, dtype=np.float32)
+beach_frac_by_site      = np.zeros(n_sites, dtype=np.float32)
+left_domain_frac_by_site = np.zeros(n_sites, dtype=np.float32)
 n_particles_by_site = np.zeros(n_sites, dtype=np.int32)
 
 for k in range(n_sites):
@@ -189,14 +219,21 @@ for k in range(n_sites):
     if n_k == 0:
         continue  # 陸判定でスキップされた地点(release時に弾かれた)。ゼロ埋めのまま
 
-    Ha, _, _ = np.histogram2d(flon[sel], flat[sel], bins=[gx, gy])
+    left_domain_frac_by_site[k] = (sel & ~in_domain).sum() / n_k
+
+    sel_in = sel & in_domain   # 領域内に留まった粒子のみを対象にする
+    if sel_in.sum() == 0:
+        continue  # 全粒子が境界離脱。このoriginは有効なマップを作れない
+
+    Ha, _, _ = np.histogram2d(flon[sel_in], flat[sel_in], bins=[gx, gy])
     Ha = Ha.T
     if Ha.sum() > 0:
         Ha = Ha / Ha.sum()
     maps_all[k] = Ha
 
-    sel_b = sel & (beached == 1)
-    beach_frac_by_site[k] = sel_b.sum() / n_k
+    sel_b = sel_in & (beached == 1)
+    n_in = sel_in.sum()
+    beach_frac_by_site[k] = sel_b.sum() / n_in if n_in > 0 else 0.0
     if sel_b.sum() > 0:
         Hb, _, _ = np.histogram2d(flon[sel_b], flat[sel_b], bins=[gx, gy])
         Hb = Hb.T
@@ -213,8 +250,12 @@ np.save("density_maps_beach.npy", maps_beach)   # shape: (n_sites, GRID_N, GRID_
 _sites_df.to_csv("release_sites_used.csv", index=False)  # origin index との対応表
 print(f"    saved density_maps_all.npy / density_maps_beach.npy  "
       f"shape={maps_all.shape}")
-print(f"    mean beached fraction across sites: {beach_frac_by_site.mean():.2f}")
+print(f"    mean beached fraction (領域内粒子中)     : {beach_frac_by_site.mean():.2f}")
+print(f"    mean left_domain fraction (領域外離脱)   : {left_domain_frac_by_site.mean():.2f}")
 print(f"    sites with zero beached particles : {(beach_frac_by_site == 0).sum()} / {n_sites}")
+if left_domain_frac_by_site.mean() > 0.3:
+    print("  !! 平均3割超が境界離脱。ドメインが狭すぎる可能性 → 領域を広げるか、"
+          "境界離脱を許容前提の設計にするか要検討")
 
 empty_origins = np.where(n_particles_by_site == 0)[0]
 if len(empty_origins) > 0:
@@ -243,6 +284,7 @@ disp = np.hypot(flon - start_lon, flat - ds.lat.isel(obs=0).values)
 print("\n===== PASS CHECK =====")
 print(f"particles           : {plon.size}")
 print(f"beached fraction(全体) : {beached.mean():.2f}   (0や1に張り付いてたら要注意)")
+print(f"left_domain fraction(全体) : {left_domain.mean():.2f}   (境界離脱率。高すぎたら領域を疑う)")
 print(f"mean displacement    : {np.nanmean(disp):.3f} deg  (>0 でないと移流できてない)")
 print(f"max  displacement    : {np.nanmax(disp):.3f} deg")
 if plot_origin is not None:

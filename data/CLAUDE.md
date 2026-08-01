@@ -103,23 +103,23 @@
 ### パイプライン本体
 | ファイル | 役割 |
 |---|---|
-| `download_era5_wind.py` | ERA5風データ取得。`download_format: unarchived` でzip回避 |
-| `gen_release_sites.py` | land maskから沿岸セルを抽出し300地点を自動生成 |
-| `trace_sim_test.py` | **シミュレータ本体**。CONFIGブロックで全パラメータ管理 |
+| `era5_download.py` | ERA5風データ取得。`download_format: unarchived` でzip回避 |
+| `release_site.py` | land maskから沿岸セルを抽出し300地点を自動生成 |
+| `sim_main.py` | **シミュレータ本体**。CONFIGブロックで全パラメータ管理 |
 
 ### 診断・可視化
 | ファイル | 役割 |
 |---|---|
-| `check_glorys.py` | GLORYSファイルの中身検証(変数名・範囲・NaN率・値域) |
+| `raw/check_glorys.py` | GLORYSファイルの中身検証(変数名・範囲・NaN率・値域) |
 | `plot_currents.py` | 海流ヒートマップ + ベクトル場 |
 | `inspect_density.py` | 密度マップの数値診断(非ゼロセル数・集中度) |
-| `plot_density_zoom.py` | 放流点周辺をズーム表示 |
-| `plot_density_log.py` | 対数スケール表示 |
-| `plot_all_origins.py` | 全origin集約 + 陸地マスク重ね |
+| `plot_all.py` | 全origin集約 + 陸地マスク重ね |
 | `check_cross_transport.py` | 越境輸送の輸送行列(origin地域→漂着地域) |
 | `plot_cross_transport.py` | 越境軌跡のみを線で描画 |
 | `plot_distance_histogram.py` | 移動距離の棒グラフ(同地域/越境で色分け) |
-| `nc_to_csv_preview.py` | NetCDFの一断面をCSV化 |
+
+未実装(将来の拡張候補。分解能が粗すぎると判断した場合にレポート改善案として実装しうる):
+放流点ズーム表示、対数スケール表示、NetCDF断面のCSV化
 
 ---
 

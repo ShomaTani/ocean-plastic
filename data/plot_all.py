@@ -3,7 +3,7 @@
 放流地点を重ねて可視化する。「全体としてどこに漂着が集中するか」を見る。
 
 使い方:
-  python plot_all_origins.py <GLORYSのncファイル> [--variant beach|all] [--log]
+  python plot_all.py <GLORYSのncファイル> [--variant beach|all] [--log]
 """
 import sys
 import argparse

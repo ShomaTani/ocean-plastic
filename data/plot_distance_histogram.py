@@ -56,8 +56,8 @@ total = same_counts + cross_counts
 
 fig, ax = plt.subplots(figsize=(10, 6))
 x = np.arange(len(labels))
-ax.bar(x, same_counts, label="同地域内 (局所再漂着)", color="#4c72b0")
-ax.bar(x, cross_counts, bottom=same_counts, label="越境輸送", color="#dd8452")
+ax.bar(x, same_counts, label="intra-region (local beaching)", color="#4c72b0")
+ax.bar(x, cross_counts, bottom=same_counts, label="inter-region", color="#dd8452")
 
 for i, t in enumerate(total):
     if t > 0:
@@ -66,10 +66,10 @@ for i, t in enumerate(total):
 
 ax.set_xticks(x)
 ax.set_xticklabels([f"{l} km" for l in labels], rotation=30, ha="right")
-ax.set_ylabel("粒子数")
-ax.set_xlabel("放出地点からの移動距離")
-ax.set_title(f"漂着までの移動距離分布 (n={valid.sum()}, "
-            f"越境率={cross.sum()/valid.sum()*100:.1f}%)")
+ax.set_ylabel("number of particles")
+ax.set_xlabel("distance travelled")
+ax.set_title(f"distribution of distance travelled (n={valid.sum()}, "
+            f"percentage of international transfer={cross.sum()/valid.sum()*100:.1f}%)")
 ax.legend()
 plt.tight_layout()
 plt.savefig(args.out, dpi=150)

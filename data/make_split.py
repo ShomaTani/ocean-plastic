@@ -9,6 +9,8 @@ train/valにまたがってリークするおそれがあるため、
 という2段階でリークを避けつつ、クラスタ数を多めに取ることで地域的な偏りも抑える。
 
 パラメータ(N_CLUSTERS, SPLIT_RATIO, SEED)は暫定値。チューニングは別途行う想定。
+
+Splits the training, test and validation data
 """
 
 import numpy as np
@@ -86,3 +88,4 @@ for s in ("train", "val", "test"):
     m = split == s
     print(f"    {s:5s}: {m.sum():3d} sites  (valid={valid[m].sum()}, zero-beach={(~valid[m]).sum()})")
 print(f"    saved {OUT_FILE} with 'split' and 'cluster_id' added")
+

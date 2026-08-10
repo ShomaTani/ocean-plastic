@@ -12,6 +12,10 @@ data/raw/*.grib
 trace_test.zarr/
 trace_run.zarr/
 
+# モデルチェックポイント (train.py で再生成可能)
+*.pt
+*.pth
+
 # 生成された放流地点・プレビュー画像 (再生成可能なもの)
 release_sites*.csv
 release_sites_preview.png

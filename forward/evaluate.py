@@ -1,0 +1,59 @@
+"""
+TRACE — テストセットでの最終評価
+
+train.pyでのhyperparameter選び(loss, epoch数等)には一切使っていない
+test split(17地点)に対して、best_model.pt を1回だけ評価する。
+"""
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from dataset import TraceDataset
+from losses import cross_entropy_loss, to_prob_map, weighted_mse_loss
+from main import AttentionUNet
+from train import ALPHA, BASE_CH, CKPT_PATH, DEVICE, IN_CH
+
+test_ds = TraceDataset("test")
+test_loader = DataLoader(test_ds, batch_size=16, shuffle=False)
+print(f"test: {len(test_ds)} samples")
+
+model = AttentionUNet(in_ch=IN_CH, base_ch=BASE_CH).to(DEVICE)
+model.load_state_dict(torch.load(CKPT_PATH, map_location=DEVICE))
+model.eval()
+
+total_mse, total_ce, n = 0.0, 0.0, 0
+with torch.no_grad():
+    for x, y, valid in test_loader:
+        x, y, valid = x.to(DEVICE), y.to(DEVICE), valid.to(DEVICE)
+        logits = model(x)
+        total_mse += weighted_mse_loss(logits, y, alpha=ALPHA).item() * x.size(0)
+        total_ce += cross_entropy_loss(logits, y, valid=valid).item() * x.size(0)
+        n += x.size(0)
+
+print(f"test weighted_mse : {total_mse / n:.6f}")
+print(f"test cross_entropy: {total_ce / n:.6f}")
+
+# =====================================================================
+# 目視確認用: test setの数地点で 入力/予測/正解 を並べて保存する
+# =====================================================================
+import matplotlib.pyplot as plt
+
+x_all, y_all, valid_all = next(iter(DataLoader(test_ds, batch_size=len(test_ds))))
+with torch.no_grad():
+    logits_all = model(x_all.to(DEVICE))
+    prob_all = to_prob_map(logits_all).cpu().numpy()
+
+picks = [0, len(test_ds) // 2, len(test_ds) - 1]
+fig, axes = plt.subplots(len(picks), 3, figsize=(10, 3 * len(picks)))
+for row, k in enumerate(picks):
+    site = test_ds.site_id[k]
+    axes[row, 0].imshow(x_all[k, 0], origin="lower", cmap="viridis")
+    axes[row, 0].set_title(f"input site {site}")
+    axes[row, 1].imshow(np.log1p(prob_all[k, 0] * 1000), origin="lower", cmap="viridis")
+    axes[row, 1].set_title("prediction (log scale)")
+    axes[row, 2].imshow(np.log1p(y_all[k, 0].numpy() * 1000), origin="lower", cmap="viridis")
+    axes[row, 2].set_title("ground truth (log scale)")
+plt.tight_layout()
+plt.savefig("test_predictions.png", dpi=100)
+print("saved test_predictions.png")

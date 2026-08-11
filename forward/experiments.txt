@@ -1,0 +1,87 @@
+TRACE 順モデル 訓練実験ログ
+============================
+
+exp01 — baseline (海流チャンネルなし、入力1ch)
+  config: BATCH_SIZE=16 LR=1e-3 EPOCHS=100 IN_CH=1 BASE_CH=32 LOSS_FN=weighted_mse ALPHA=5.0 PATIENCE=15
+  結果: 26epochで早期終了(best epoch=11, val=0.000135)。trainは下がり続けたがvalは
+        epoch11で頭打ち→過学習の兆候。
+  診断: 予測ピーク位置と入力ピーク位置の距離が平均0.1px(ほぼ完全一致)。
+        「入力をそのままコピー/ぼかしてるだけ」で海流輸送を学習できていないと判明
+        (pred-vs-true距離とinput-vs-true距離が統計的に同じ=11.3px)。
+  判断: 入力に座標情報しかなく、海流の手がかりが一切ないための限界と判断。
+        → 平均u, vを追加チャンネルとして入力に足すことにした(exp02へ)。
+
+exp02 — 海流チャンネル追加 (入力3ch: gaussian + 平均u + 平均v)
+  config: BATCH_SIZE=16 LR=1e-3 EPOCHS=100 IN_CH=3 BASE_CH=32 LOSS_FN=weighted_mse ALPHA=5.0 PATIENCE=15
+  結果: 45epochで早期終了。train/valともにほぼ完全に横ばい(train≈0.000183-0.000184,
+        val≈0.000200のまま45epoch動かず)。exp01より明らかに悪化。
+  診断: バッチ内の予測確率マップの分散が1.2e-7(ほぼゼロ)。入力(放出地点)が
+        全然違う3サンプルで予測argmaxピクセルが全く同じ(50,80)。
+        → モデルが入力を完全に無視し、常に同じ1枚を返す「定数出力」に収束したと判明。
+  仮説: u,vは全サンプル共通の固定チャンネルで、変動の少ない支配的な信号。
+        学習初期に「平均的に無難な1枚を返す」局所最適に落ち、そこから
+        site依存の出力に分化する学習に進めなかった可能性が高い。
+        LR/patienceがこのタスクの難度に対して不十分だった疑い。
+
+exp03 — LR下げ + patience延長 (exp02の仮説「局所最適から抜け出せてない」を検証)
+  config: seed=42固定。 BATCH_SIZE=16 LR=1e-4(1e-3から) EPOCHS=150 IN_CH=3 BASE_CH=32
+          LOSS_FN=weighted_mse ALPHA=5.0 PATIENCE=30(15から)
+  結果: 62epochで早期終了(best val=0.000199)。train/valとも exp02と同じく完全に横ばい。
+  診断: 予測のバッチ内分散2.4e-8(exp02よりさらに悪化)。5サンプル全部で予測argmaxが
+        (41,84)に完全一致、入力argmaxは(5,32)〜(8,33)付近でばらばらなのに反応なし。
+  判断: LR/patienceの調整では解決しなかった。「局所最適から抜け出せてない」という
+        仮説は違う、もしくはLRの調整方向・幅が的外れだった可能性。
+        → 次はloss関数をcross_entropyに切り替えて試す(exp04へ)。
+
+exp04 — loss切り替え (weighted_mse -> cross_entropy)、LR/patienceはexp01/exp02と同じに戻す
+  config: seed=42固定。 BATCH_SIZE=16 LR=1e-3 EPOCHS=100 IN_CH=3 BASE_CH=32
+          LOSS_FN=cross_entropy PATIENCE=15
+  結果: 52epochで早期終了(best epoch=37, val=3.515)。train 9.46→1.27、val 9.63→3.51と
+        exp02/exp03と違って明確に学習が進んだ。過学習の兆候(train↓val横ばい)もepoch37以降で
+        出ているが、想定内(exp01でも同様の傾向だった)。
+  診断: バッチ内の予測分散2.66e-4(exp02/exp03の1e-7〜1e-8から3〜4桁改善)。サンプルごとに
+        入力位置に応じて予測が明確に変化するようになった。
+  可視化(test_predictions.png): site 199で、正解の漂着クラスタが入力から離れた場所に
+        あるのに対し、予測もその方向に向かって伸びる分布になっている
+        (exp01ではここが「入力をコピーするだけ」で全く反応できていなかった)。
+  判断: exp02/exp03の「定数出力への collapse」は weighted_mse損失が原因だった可能性が高い
+        (無難な平均的分布でもlossがある程度下がってしまうため、勾配が位置依存の学習に向かいにくい)。
+        cross_entropyに切り替えたことで解決。現状のベストconfigとして採用する。
+  test評価: weighted_mse=0.000109, cross_entropy=4.629 (test 17地点)
+
+exp05 — cross_entropy用のLR再探索 (sweep_lr.py, 候補: 3e-4, 1e-3, 3e-3, 1e-2)
+  config: exp04と同じ(seed=42, BATCH_SIZE=16 EPOCHS=100 IN_CH=3 BASE_CH=32
+          LOSS_FN=cross_entropy PATIENCE=15)、LRだけ変える
+  結果:
+    LR=3e-4  best_val=3.762714
+    LR=1e-3  best_val=3.514996  (exp04と同一設定、再現確認)
+    LR=3e-3  best_val=3.057892  ← 最良
+    LR=1e-2  best_val=3.333228
+  判断: LR=3e-3を採用。train.pyのCONFIGを更新し、best_model.ptもこの重みに置き換えた。
+        次は学習率スケジューラ(ReduceLROnPlateau)を試す(exp06へ)。
+
+exp06 — 学習率スケジューラ(ReduceLROnPlateau)導入
+  config: exp05(LR=3e-3)がベースの初期LR。factor=0.5, patience=5でval停滞時にLRを半減。
+          それ以外はexp05と同じ(seed=42, IN_CH=3, BASE_CH=32, LOSS_FN=cross_entropy,
+          早期終了PATIENCE=15)
+  結果: 41epochで早期終了。LRは3e-3→1.5e-3(epoch23)→7.5e-4(epoch32)→3.8e-4(epoch38)
+        と3段階で下がった。best val=3.169739(epoch26時点)。
+  判断: exp05(スケジューラなし、LR=3e-3固定, best val=3.057892)より悪化。
+        今回のデータ規模・epoch数だとスケジューラを入れる効果はなく、むしろLRを
+        下げるタイミングが早すぎて収束を妨げた可能性がある。
+        → USE_SCHEDULER=Falseに戻し、exp05の重み(sweep_lr_3e-03.pt)をbest_model.ptとして復元。
+        次は候補3(海流チャンネルの情報量を増やす)を試す。
+
+exp07 — 海流チャンネル追加: speed(流速の大きさ=√(u²+v²))を4ch目として追加
+  config: exp05と同じ(seed=42, LR=3e-3, USE_SCHEDULER=False, LOSS_FN=cross_entropy,
+          PATIENCE=15)、IN_CH=3->4、build_current_field.pyでspeedチャンネルを追加生成
+  結果: 30epochで早期終了。best val=3.963832(epoch15時点)。
+  判断: exp05(3ch, val=3.058)より悪化。speedはu,vから決定的に計算できる冗長な情報
+        (モデルが既に持ってる情報を再掲しただけ)で、新しい手がかりにはならず、
+        むしろ入力次元が増えた分パラメータ数が増えて(1層目のconv)、この小データ規模では
+        過学習・最適化の難化に振れた可能性が高い。
+        → IN_CH=3に戻す(speedチャンネルは不採用)。dataset.pyもu,vのみに戻した。
+        現状のベストは引き続きexp05(LR=3e-3, スケジューラなし, 3ch, val=3.058)。
+        次は過学習対策に進む。
+
+(以降、この下に追記していく)

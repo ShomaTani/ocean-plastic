@@ -17,13 +17,19 @@ from losses import cross_entropy_loss, weighted_mse_loss
 # =====================================================================
 # CONFIG — 暫定値
 # =====================================================================
+SEED = 42                  # 実験間で初期値・shuffleを揃えて比較できるようにする
 BATCH_SIZE = 16
-LR = 1e-3
+LR = 3e-3                  # exp05: LR sweep(3e-4,1e-3,3e-3,1e-2)で最良だった値
+WEIGHT_DECAY = 1e-4        # exp08: 過学習対策。Adamの重み減衰(L2正則化)
 EPOCHS = 100
+IN_CH = 3                  # exp07でspeedチャンネルも試したが不採用、3chに戻す
 BASE_CH = 32
-LOSS_FN = "weighted_mse"   # "weighted_mse" or "cross_entropy"
-ALPHA = 5.0                # weighted_mse用の非ゼロ画素の重み
-PATIENCE = 15              # val lossがこの回数連続で改善しなければ早期終了
+LOSS_FN = "cross_entropy"  # exp04: weighted_mse -> cross_entropy
+ALPHA = 5.0                # weighted_mse用の非ゼロ画素の重み(cross_entropy使用中は無視)
+PATIENCE = 15               # exp01/exp02と同じ値に戻す
+USE_SCHEDULER = False       # exp06で試したが効果なし(val 3.058→3.170と悪化)だったのでOFFに戻す
+SCHED_FACTOR = 0.5          # val loss停滞時にLRを何倍にするか
+SCHED_PATIENCE = 5          # 何epoch停滞したらLRを下げるか(早期終了のPATIENCEより短くする)
 CKPT_PATH = Path(__file__).resolve().parent / "best_model.pt"
 
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -61,7 +67,8 @@ def run_epoch(model, loader, optimizer=None):
 
 
 def main():
-    print(f"device: {DEVICE}")
+    torch.manual_seed(SEED)
+    print(f"device: {DEVICE}, seed: {SEED}")
 
     train_ds = TraceDataset("train")
     val_ds = TraceDataset("val")
@@ -69,32 +76,47 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
     print(f"train: {len(train_ds)} samples, val: {len(val_ds)} samples")
 
-    model = AttentionUNet(base_ch=BASE_CH).to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    model = AttentionUNet(in_ch=IN_CH, base_ch=BASE_CH).to(DEVICE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    scheduler = None
+    if USE_SCHEDULER:
+        # val lossがSCHED_PATIENCE epoch連続で改善しなければLRをSCHED_FACTOR倍に下げる
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=SCHED_FACTOR, patience=SCHED_PATIENCE
+        )
 
     best_val = float("inf")
+    train_at_best = None  # best_valを更新した瞬間のtrain loss(過学習の"gap"を見るため)
     epochs_since_improve = 0
 
     for epoch in range(1, EPOCHS + 1):
         train_loss = run_epoch(model, train_loader, optimizer)
         val_loss = run_epoch(model, val_loader, optimizer=None)
 
+        if scheduler is not None:
+            scheduler.step(val_loss)
+
         improved = val_loss < best_val
         if improved:
             best_val = val_loss
+            train_at_best = train_loss
             epochs_since_improve = 0
             torch.save(model.state_dict(), CKPT_PATH)
         else:
             epochs_since_improve += 1
 
-        print(f"epoch {epoch:3d}  train={train_loss:.6f}  val={val_loss:.6f}"
+        lr_now = optimizer.param_groups[0]["lr"]
+        print(f"epoch {epoch:3d}  train={train_loss:.6f}  val={val_loss:.6f}  lr={lr_now:.1e}"
               f"{'  * best' if improved else ''}")
 
         if epochs_since_improve >= PATIENCE:
             print(f"early stopping (val loss未改善が{PATIENCE}epoch続いた)")
             break
 
-    print(f"done. best val loss = {best_val:.6f}  (saved to {CKPT_PATH})")
+    gap = train_at_best is not None and (best_val - train_at_best)
+    print(f"done. best val loss = {best_val:.6f}  (train@best={train_at_best:.6f}, "
+          f"gap={gap:.6f})  saved to {CKPT_PATH}")
+    return best_val, train_at_best
 
 
 if __name__ == "__main__":

@@ -84,4 +84,40 @@ exp07 — 海流チャンネル追加: speed(流速の大きさ=√(u²+v²))を
         現状のベストは引き続きexp05(LR=3e-3, スケジューラなし, 3ch, val=3.058)。
         次は過学習対策に進む。
 
+--- ここから過学習対策 ---
+
+exp08 — weight decay(Adamの重み減衰、L2正則化)を探索 (sweep_wd.py)
+  config: exp05がベース(seed=42, LR=3e-3, IN_CH=3, BASE_CH=32, LOSS_FN=cross_entropy,
+          PATIENCE=15, USE_SCHEDULER=False)、weight_decayだけ変える
+          候補: 0, 1e-5, 1e-4, 1e-3, 1e-2
+  結果:
+    wd=1e-3  best_val=2.964734  train@best=2.462218  gap=0.502516  ← 最良
+    wd=0     best_val=3.057892  train@best=1.274776  gap=1.783116  (exp05そのもの)
+    wd=1e-4  best_val=3.152416  train@best=1.823006  gap=1.329411
+    wd=1e-2  best_val=3.168164  train@best=2.054457  gap=1.113707
+    wd=1e-5  best_val=3.305793  train@best=1.781372  gap=1.524421
+  判断: wd=1e-3が val loss・train-valのgap の両方で最良。過学習対策として明確に効いている
+        (gapが1.783→0.503まで縮小)。採用。train.pyのWEIGHT_DECAYを1e-3に更新、
+        best_model.ptもこの重みに置き換えた。
+  可視化: test_predictions.pngをtest set全17地点に拡張して確認。予測が「そのクラスタ
+        (地域)一帯のおおまかな輸送方向」は捉えられているが、クラスタ内の地点ごとの
+        細かい違いまでは再現できていない。300地点という訓練データ規模の限界と見られる。
+  次: Dropoutも試す(exp09へ)。
+
+exp09 — Dropout2d を各ConvBlock末尾に追加して探索 (sweep_dropout.py)
+  config: exp08がベース(seed=42, LR=3e-3, WEIGHT_DECAY=1e-3, IN_CH=3, BASE_CH=32,
+          LOSS_FN=cross_entropy, PATIENCE=15, USE_SCHEDULER=False)、dropout_pだけ変える
+          候補: 0.0, 0.1, 0.2, 0.3 (main.pyのConvBlockにnn.Dropout2dを追加実装)
+  結果:
+    dropout_p=0.0  best_val=2.964734  train@best=2.462218  gap=0.502516  ← 最良(exp08そのもの)
+    dropout_p=0.3  best_val=3.099919  train@best=2.699679  gap=0.400240
+    dropout_p=0.1  best_val=3.381819  train@best=2.688350  gap=0.693469
+    dropout_p=0.2  best_val=3.652922  train@best=3.240716  gap=0.412205
+  判断: 全てのdropout_p>0でval lossが悪化。weight_decay=1e-3で既に正則化が効いている状態に
+        Dropoutを重ねると、train lossまで一緒に上がってしまい(=trainにすら十分フィット
+        できなくなる)過剰な正則化になったと見られる。不採用、dropout_p=0.0を維持。
+  現状のベスト構成(exp08と同一): seed=42, LR=3e-3, WEIGHT_DECAY=1e-3, IN_CH=3, BASE_CH=32,
+        LOSS_FN=cross_entropy, DROPOUT_P=0.0, PATIENCE=15, USE_SCHEDULER=False
+        best val (cross_entropy) = 2.964734
+
 (以降、この下に追記していく)

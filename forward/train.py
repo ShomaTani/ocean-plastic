@@ -20,10 +20,11 @@ from losses import cross_entropy_loss, weighted_mse_loss
 SEED = 42                  # 実験間で初期値・shuffleを揃えて比較できるようにする
 BATCH_SIZE = 16
 LR = 3e-3                  # exp05: LR sweep(3e-4,1e-3,3e-3,1e-2)で最良だった値
-WEIGHT_DECAY = 1e-4        # exp08: 過学習対策。Adamの重み減衰(L2正則化)
+WEIGHT_DECAY = 1e-3        # exp08: sweepで最良(val 3.058->2.965, gap 1.78->0.50)
 EPOCHS = 100
 IN_CH = 3                  # exp07でspeedチャンネルも試したが不採用、3chに戻す
 BASE_CH = 32
+DROPOUT_P = 0.0            # exp09: 0.1/0.2/0.3を試したが全て悪化(weight_decayと重複して過剰正則化)。0.0を維持
 LOSS_FN = "cross_entropy"  # exp04: weighted_mse -> cross_entropy
 ALPHA = 5.0                # weighted_mse用の非ゼロ画素の重み(cross_entropy使用中は無視)
 PATIENCE = 15               # exp01/exp02と同じ値に戻す
@@ -76,7 +77,7 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
     print(f"train: {len(train_ds)} samples, val: {len(val_ds)} samples")
 
-    model = AttentionUNet(in_ch=IN_CH, base_ch=BASE_CH).to(DEVICE)
+    model = AttentionUNet(in_ch=IN_CH, base_ch=BASE_CH, dropout_p=DROPOUT_P).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     scheduler = None
     if USE_SCHEDULER:

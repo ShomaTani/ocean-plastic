@@ -35,7 +35,7 @@ print(f"test weighted_mse : {total_mse / n:.6f}")
 print(f"test cross_entropy: {total_ce / n:.6f}")
 
 # =====================================================================
-# 目視確認用: test setの数地点で 入力/予測/正解 を並べて保存する
+# 目視確認用: test set全地点で 入力/予測/正解 を並べて保存する
 # =====================================================================
 import matplotlib.pyplot as plt
 
@@ -44,16 +44,17 @@ with torch.no_grad():
     logits_all = model(x_all.to(DEVICE))
     prob_all = to_prob_map(logits_all).cpu().numpy()
 
-picks = [0, len(test_ds) // 2, len(test_ds) - 1]
-fig, axes = plt.subplots(len(picks), 3, figsize=(10, 3 * len(picks)))
-for row, k in enumerate(picks):
-    site = test_ds.site_id[k]
-    axes[row, 0].imshow(x_all[k, 0], origin="lower", cmap="viridis")
-    axes[row, 0].set_title(f"input site {site}")
-    axes[row, 1].imshow(np.log1p(prob_all[k, 0] * 1000), origin="lower", cmap="viridis")
+n_show = len(test_ds)
+fig, axes = plt.subplots(n_show, 3, figsize=(9, 3 * n_show))
+for row in range(n_show):
+    site = test_ds.site_id[row]
+    tag = "" if valid_all[row] else "  (zero-beach)"
+    axes[row, 0].imshow(x_all[row, 0], origin="lower", cmap="viridis")
+    axes[row, 0].set_title(f"input site {site}{tag}")
+    axes[row, 1].imshow(np.log1p(prob_all[row, 0] * 1000), origin="lower", cmap="viridis")
     axes[row, 1].set_title("prediction (log scale)")
-    axes[row, 2].imshow(np.log1p(y_all[k, 0].numpy() * 1000), origin="lower", cmap="viridis")
+    axes[row, 2].imshow(np.log1p(y_all[row, 0].numpy() * 1000), origin="lower", cmap="viridis")
     axes[row, 2].set_title("ground truth (log scale)")
 plt.tight_layout()
 plt.savefig("test_predictions.png", dpi=100)
-print("saved test_predictions.png")
+print(f"saved test_predictions.png ({n_show} sites)")

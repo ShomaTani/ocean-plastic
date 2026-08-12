@@ -1,0 +1,43 @@
+TRACE 逆モデル 訓練実験ログ
+============================
+
+順モデルのforward/experiments.txtと同じ形式。ベース設定はforwardのベスト構成
+(LR=3e-3, weight_decay=1e-3, cross_entropy, dropout無し, base_ch=32)をそのまま
+初期値として流用している。
+
+bexp01 — baseline (forwardのベスト設定をそのまま流用)
+  config: seed=42, LR=3e-3, WEIGHT_DECAY=1e-3, IN_CH=3, BASE_CH=32,
+          LOSS_FN=cross_entropy, DROPOUT_P=0.0, PATIENCE=15, USE_SCHEDULER=False
+          出力Yは点質量のみ(ぼかし無し)
+  結果: 47epochで早期終了。best val=5.797112(epoch32時点)、train@best=1.115720、
+        gap=4.681393。順モデルのgap(0.50)よりかなり悪い。
+  診断: 出力側の可視化で、観測点から離れた場所に予測が広がるケースが見られた。
+        n_origins=1のセル(292/617)は責任マップが16384マス中1マスだけ非ゼロという
+        ほぼデルタ関数で、cross_entropyがtrain例の丸暗記を助長している可能性が
+        高いと判断(順・逆モデルの構造的な違い: 順モデルの出力は50粒子の物理的
+        ばらつきで自然に広がるが、逆モデルの出力は座標に点質量を置いただけ)。
+  判断: 出力側にもガウシアンぼかしを入れる(bexp02へ)。
+
+bexp02 — 出力の責任マップにガウシアンぼかしを追加 (build_backward_pairs.py修正)
+  config: bexp01と同じ。build_backward_pairs.pyのstep3で、origin位置への点質量を
+          積み上げた後、入力側と同じgaussian_filter(sigma=1.0, mode="constant")で
+          ぼかしてからsum=1に再正規化するよう変更。make_split_backward.pyも再実行
+          (座標は変わらないのでtrain/val/testの内訳は同一: 496/74/47)
+  結果: 46epochで早期終了。best val=5.191051(epoch31時点)、train@best=4.205179、
+        gap=0.985872。
+  判断: bexp01からval 5.797→5.191、gap 4.681→0.986(約1/5)に改善。仮説通り、
+        デルタ関数的ターゲットが丸暗記を助長していたのが主因だった。採用、
+        以降このぼかし込みのbackward_pairs.npzをベースにする。
+  次: weight_decay/LRの再探索(bexp03へ)、n_origins層化split(別途)。
+
+bexp03 — LR再探索 (sweep_lr.py, 候補: 3e-4, 1e-3, 3e-3, 1e-2)
+  config: bexp02がベース(seed=42, WEIGHT_DECAY=1e-3, IN_CH=3, BASE_CH=32,
+          LOSS_FN=cross_entropy, PATIENCE=15)、LRだけ変える
+  結果:
+    LR=3e-3  best_val=5.191051  train@best=4.205179  gap=0.985872  ← 最良(bexp02そのもの)
+    LR=1e-2  best_val=5.381954  train@best=4.425625  gap=0.956330
+    LR=1e-3  best_val=5.343147  train@best=3.772070  gap=1.571077
+    LR=3e-4  best_val=6.080480  train@best=3.772837  gap=2.307643
+  判断: LR=3e-3が最良(順モデルと同じ値)。変更なし。次はweight_decay再探索(bexp04へ)。
+
+(以降、この下に追記していく)

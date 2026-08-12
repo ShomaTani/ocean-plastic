@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import TraceDataset
+from dataset import TraceDataset, load_coastal_mask
 from main import AttentionUNet
 from losses import cross_entropy_loss, weighted_mse_loss
 
@@ -31,16 +31,19 @@ PATIENCE = 15               # exp01/exp02と同じ値に戻す
 USE_SCHEDULER = False       # exp06で試したが効果なし(val 3.058→3.170と悪化)だったのでOFFに戻す
 SCHED_FACTOR = 0.5          # val loss停滞時にLRを何倍にするか
 SCHED_PATIENCE = 5          # 何epoch停滞したらLRを下げるか(早期終了のPATIENCEより短くする)
+COASTAL_DILATION = 3        # exp10: Streamlitデモで発覚した「海上への謎の広がり」対策。
+                             # masked softmaxで非沿岸セルへの確率漏れを抑える(緩め設定)
 CKPT_PATH = Path(__file__).resolve().parent / "best_model.pt"
 
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+COASTAL_MASK = load_coastal_mask(dilation=COASTAL_DILATION).to(DEVICE)
 
 
 def compute_loss(logits, y, valid):
     if LOSS_FN == "weighted_mse":
-        return weighted_mse_loss(logits, y, alpha=ALPHA)
+        return weighted_mse_loss(logits, y, alpha=ALPHA, mask=COASTAL_MASK)
     elif LOSS_FN == "cross_entropy":
-        return cross_entropy_loss(logits, y, valid=valid)
+        return cross_entropy_loss(logits, y, valid=valid, mask=COASTAL_MASK)
     raise ValueError(f"unknown LOSS_FN: {LOSS_FN}")
 
 

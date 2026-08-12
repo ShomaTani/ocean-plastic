@@ -15,17 +15,39 @@ AttentionUNet(main.py)はロジット(生の値、活性化なし)を返す設�
 import torch
 
 
-def to_prob_map(logits):
+def to_prob_map(logits, mask=None):
     """モデルの生の出力 (B,1,H,W) を、画像全体で合計1になる確率分布に変換する。
     画素ごとに独立なsigmoidと違い、softmaxは全画素が"取り合い"になるので
-    合計が1という制約を厳密に満たせる(=Yと同じ「確率分布」として比較できる)。"""
+    合計が1という制約を厳密に満たせる(=Yと同じ「確率分布」として比較できる)。
+
+    mask (H,W のbool、Trueが許可セル) を渡すと、Falseの場所のロジットを
+    softmaxの前に-infにする(masked softmax)。Falseの場所は確率が厳密に0になる。
+    """
     B, C, H, W = logits.shape
     flat = logits.view(B, -1)          # (B, H*W)
+    if mask is not None:
+        flat = flat.masked_fill(~mask.reshape(1, -1), float("-inf"))
     prob = torch.softmax(flat, dim=1)  # 合計1
     return prob.view(B, C, H, W)
 
 
-def cross_entropy_loss(logits, target, valid=None, eps=1e-8):
+def _apply_mask_to_target(target, mask, eps=1e-8):
+    """maskを渡した場合、targetもそのmaskで切り落として再正規化する。
+    predict側だけmaskしてtargetをそのままにすると、モデルが原理的に
+    出力不可能な場所(mask外)にtargetの質量が残ったままになり、
+    crossentropyがlog(eps)相当の埋めがたい罰則を背負い続けてしまう
+    (逆モデルのbexp07で実際に踏んだ罠)。両側を同じ空間に揃えることで
+    これを防ぐ。mask外の質量が全部(=このサンプルのtargetがmask外に
+    しか無い)場合は、そのサンプルは全0のまま返す(後続でNaNにならない)。
+    """
+    if mask is None:
+        return target
+    masked = target * mask.reshape(1, 1, *mask.shape).float()
+    total = masked.flatten(1).sum(dim=1).clamp_min(eps).view(-1, 1, 1, 1)
+    return masked / total
+
+
+def cross_entropy_loss(logits, target, valid=None, eps=1e-8, mask=None):
     """target(合計1の確率分布)に対するクロスエントロピー。
 
     target=0のピクセルは `target * log(prob)` の項がそのまま0になるので、
@@ -38,7 +60,8 @@ def cross_entropy_loss(logits, target, valid=None, eps=1e-8):
     validでフィルタして平均を取ることで、レポートするloss値が
     "学習に寄与したサンプルだけの平均" になるようにしている。
     """
-    prob = to_prob_map(logits)
+    target = _apply_mask_to_target(target, mask, eps)
+    prob = to_prob_map(logits, mask=mask)
     per_sample = -(target * torch.log(prob + eps)).flatten(1).sum(dim=1)  # (B,)
     if valid is not None:
         per_sample = per_sample[valid]
@@ -47,7 +70,7 @@ def cross_entropy_loss(logits, target, valid=None, eps=1e-8):
     return per_sample.mean()
 
 
-def weighted_mse_loss(logits, target, alpha=5.0, valid=None):
+def weighted_mse_loss(logits, target, alpha=5.0, valid=None, mask=None):
     """target非ゼロ画素の重みをalpha倍にした重み付きMSE。
     予測側もsoftmaxで合計1に揃えてから比較する(スケールをYに合わせるため)。
 
@@ -58,7 +81,8 @@ def weighted_mse_loss(logits, target, alpha=5.0, valid=None):
     (=「この起源は特定の場所に偏らない」という信号として機能する)。
     なので通常はvalidを渡さず、invalidサンプルも学習に含めてよい。
     """
-    prob = to_prob_map(logits)
+    target = _apply_mask_to_target(target, mask, eps=1e-8)
+    prob = to_prob_map(logits, mask=mask)
     weight = 1.0 + alpha * (target > 0).float()
     per_pixel = weight * (prob - target) ** 2
     per_sample = per_pixel.flatten(1).mean(dim=1)  # (B,)

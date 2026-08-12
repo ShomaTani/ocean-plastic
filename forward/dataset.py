@@ -26,6 +26,21 @@ DEFAULT_NPZ = DATA_DIR / "train_pairs.npz"
 DEFAULT_CURRENT_NPZ = DATA_DIR / "current_field.npz"
 
 
+def load_coastal_mask(dilation=3, current_npz_path=DEFAULT_CURRENT_NPZ):
+    """漂着は陸に接触した場所でしか起きないはずだが、128x128の粗いグリッドだと
+    小島や複雑な海岸線が陸マスクから欠落し、本物の漂着セルの一部が「非沿岸」に
+    見えてしまう(dilation=1だと正解Yの48%が漏れる)。dilation回数を増やして
+    許容範囲を緩めることで、本物の信号を削りすぎずに「あからさまに沖合すぎる
+    予測」だけを抑える方向を狙う(bexp Aアプローチ、backward/dataset.pyの
+    load_coastal_mask相当だが既定のdilationを緩めてある)。"""
+    from scipy.ndimage import binary_dilation
+
+    c = np.load(current_npz_path)
+    land = c["land_mask"]
+    coastal = binary_dilation(land, iterations=dilation) & ~land
+    return torch.from_numpy(coastal)
+
+
 class TraceDataset(Dataset):
     def __init__(self, split, npz_path=DEFAULT_NPZ, current_npz_path=DEFAULT_CURRENT_NPZ):
         d = np.load(npz_path)

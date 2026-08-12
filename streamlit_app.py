@@ -1,0 +1,233 @@
+"""
+TRACE — Streamlit デモアプリ
+
+順モデル(放出点→漂着分布)・逆モデル(観測点→責任マップ)を、地図をクリックして
+その場で推論・可視化できる形にしたもの。forward/predict_point.py,
+backward/predict_point.py と同じ推論・配色ロジックを、Streamlit用に関数化して使う。
+
+起動: streamlit run streamlit_app.py
+"""
+
+import importlib
+import sys
+from io import BytesIO
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import streamlit as st
+import torch
+from PIL import Image
+from scipy.ndimage import binary_dilation, gaussian_filter
+from streamlit_image_coordinates import streamlit_image_coordinates
+
+ROOT = Path(__file__).resolve().parent
+DATA_DIR = ROOT / "data"
+GRID_N = 128
+SIGMA_PX = 1.0
+UPSCALE = 4  # クリック用の表示画像の拡大率(128 -> 512px)
+
+# =====================================================================
+# forward/ と backward/ は同じファイル名(main.py, dataset.py, losses.py,
+# train.py)を持つので、素朴に import すると片方しか読めない(後から読んだ
+# 方でsys.modulesが上書きされる)。1つのStreamlitプロセス内で両方を同時に
+# 使うために、読み込むたびにsys.modulesから該当名を追い出してから読み直す
+# ヘルパーを使い、戻り値の辞書に直接参照を保持しておく。
+# =====================================================================
+_SHARED_NAMES = ["main", "dataset", "losses", "train"]
+
+
+def import_fresh(dir_path):
+    for name in _SHARED_NAMES:
+        sys.modules.pop(name, None)
+    sys.path.insert(0, str(dir_path))
+    try:
+        return {name: importlib.import_module(name) for name in _SHARED_NAMES}
+    finally:
+        sys.path.remove(str(dir_path))
+
+
+@st.cache_resource
+def load_side(dir_name):
+    mods = import_fresh(ROOT / dir_name)
+    model = mods["main"].AttentionUNet(
+        in_ch=mods["train"].IN_CH, base_ch=mods["train"].BASE_CH
+    ).to(mods["train"].DEVICE)
+    model.load_state_dict(torch.load(mods["train"].CKPT_PATH, map_location=mods["train"].DEVICE))
+    model.eval()
+    return {
+        "model": model,
+        "device": mods["train"].DEVICE,
+        "to_prob_map": mods["losses"].to_prob_map,
+        # forward(dilation=3, exp10)とbackward(dilation=1, bexp07)で許容範囲が
+        # 違うので、それぞれのtrain.pyが実際に訓練で使ったマスクをそのまま流用する
+        # (ここで独自に作り直すと訓練時と推論時のマスクがズレる事故につながる)
+        "coastal_mask": mods["train"].COASTAL_MASK,
+    }
+
+
+@st.cache_resource
+def load_grid():
+    """GLORYS生データは開かず、current_field.npz(既に128x128に整形済み)と
+    確定済みのドメイン範囲(東経120-150, 北緯25-50)だけで完結させる。"""
+    c = np.load(DATA_DIR / "current_field.npz")
+    land_mask = c["land_mask"]
+    coastal_mask = binary_dilation(land_mask) & ~land_mask
+    gx = np.linspace(120.0, 150.0, GRID_N + 1)
+    gy = np.linspace(25.0, 50.0, GRID_N + 1)
+
+    # クリックが陸/沖合すぎる場合に「最寄りの沿岸セル」へ補正するためのKDTree。
+    # 一度だけ構築してキャッシュしておく(毎クリック作り直すのは無駄なので)。
+    from scipy.spatial import cKDTree
+    coastal_rc = np.column_stack(np.where(coastal_mask))  # (n_coastal, 2) = [row, col]
+    coastal_tree = cKDTree(coastal_rc)
+
+    return {
+        "u": c["u"], "v": c["v"],
+        "land_mask": land_mask, "coastal_mask": coastal_mask,
+        "gx": gx, "gy": gy,
+        "coastal_rc": coastal_rc, "coastal_tree": coastal_tree,
+    }
+
+
+MAX_SNAP_RADIUS_PX = 15  # これより遠いと「最寄りの沿岸」への補正を諦めてエラーにする
+
+
+def snap_to_coastal(row, col, grid):
+    """(row, col)が沿岸セルでなければ、最寄りの沿岸セルの(row, col)を返す。
+    近すぎる沿岸が無い(内陸奥深く・外洋のど真ん中)場合はNoneを返す。"""
+    if grid["coastal_mask"][row, col]:
+        return row, col, 0.0
+    dist, idx = grid["coastal_tree"].query([row, col])
+    if dist > MAX_SNAP_RADIUS_PX:
+        return None
+    r, c = grid["coastal_rc"][idx]
+    return int(r), int(c), float(dist)
+
+
+def lonlat_to_pixel(lon, lat, grid):
+    gx, gy = grid["gx"], grid["gy"]
+    col = int(np.clip(np.floor((lon - gx[0]) / (gx[1] - gx[0])), 0, GRID_N - 1))
+    row = int(np.clip(np.floor((lat - gy[0]) / (gy[1] - gy[0])), 0, GRID_N - 1))
+    return row, col
+
+
+def make_gaussian(row, col):
+    onehot = np.zeros((GRID_N, GRID_N), dtype=np.float64)
+    onehot[row, col] = 1.0
+    g = gaussian_filter(onehot, sigma=SIGMA_PX, mode="constant")
+    return (g / g.sum()).astype(np.float32)
+
+
+def predict(mode, row, col, grid):
+    side = load_side("forward" if mode == "forward" else "backward")
+    gaussian = make_gaussian(row, col)
+    x = torch.from_numpy(np.stack([gaussian, grid["u"], grid["v"]])).unsqueeze(0).float()
+    with torch.no_grad():
+        logits = side["model"](x.to(side["device"]))
+        prob = side["to_prob_map"](logits, mask=side["coastal_mask"]).cpu().numpy()[0, 0]
+    return gaussian, prob
+
+
+# =====================================================================
+# 可視化(forward/backward predict_point.pyと同じ配色ロジック)
+# =====================================================================
+LAND_COLOR = (0.87, 0.83, 0.72, 1)
+CMAP_FLOOR = 0.35
+
+
+def to_rgba(values, land_mask, threshold, cmap_name="Purples", cmap_floor=CMAP_FLOOR):
+    below = values <= threshold
+    show = ~below & ~land_mask
+    cmap = plt.get_cmap(cmap_name)
+    vmax = values[show].max() if show.any() else 1.0
+    norm = plt.Normalize(vmin=threshold, vmax=vmax)
+    t = norm(values)
+    rgba = cmap(cmap_floor + (1 - cmap_floor) * t)
+    rgba[below] = (1, 1, 1, 1)
+    rgba[land_mask] = LAND_COLOR
+    return rgba, norm, cmap
+
+
+def base_map_image(grid, selected=None):
+    """クリック用のベタ塗り画像。matplotlibの軸・余白を一切含めない
+    (ピクセル座標がそのままrow/colに対応するようにするため)。"""
+    land_mask = grid["land_mask"]
+    rgba = np.where(land_mask[..., None], np.array(LAND_COLOR), np.array((1, 1, 1, 1)))
+    rgba = (rgba * 255).astype(np.uint8)
+    if selected is not None:
+        r, c = selected
+        rgba[max(0, r - 1):r + 2, max(0, c - 1):c + 2] = (220, 20, 20, 255)
+    img = Image.fromarray(np.flipud(rgba), mode="RGBA")  # row0=南なので画像的には下→上下反転
+    img = img.resize((GRID_N * UPSCALE, GRID_N * UPSCALE), Image.NEAREST)
+    return img
+
+
+def prediction_figure(gaussian, prob, land_mask, title):
+    gaussian_rgba, _, _ = to_rgba(gaussian, land_mask, threshold=0.0)
+    uniform_baseline = 1.0 / (GRID_N * GRID_N)
+    prob_log = np.log1p(prob * 1000)
+    prob_rgba, prob_norm, prob_cmap = to_rgba(
+        prob_log, land_mask, threshold=np.log1p(uniform_baseline * 1000)
+    )
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4.2))
+    axes[0].imshow(gaussian_rgba, origin="lower")
+    axes[0].set_title("input point")
+    axes[0].set_xticks([]); axes[0].set_yticks([])
+    axes[1].imshow(prob_rgba, origin="lower")
+    axes[1].set_title(title)
+    axes[1].set_xticks([]); axes[1].set_yticks([])
+    sm = plt.cm.ScalarMappable(norm=prob_norm, cmap=prob_cmap)
+    plt.colorbar(sm, ax=axes[1], fraction=0.046)
+    plt.tight_layout()
+    return fig
+
+
+# =====================================================================
+# UI
+# =====================================================================
+st.set_page_config(page_title="TRACE", layout="centered")
+st.title("TRACE")
+
+mode_label = st.radio(
+    "モード", ["順モデル(放出点 → 漂着分布)", "逆モデル(観測点 → 責任マップ)"],
+    horizontal=True,
+)
+mode = "forward" if mode_label.startswith("順") else "backward"
+
+grid = load_grid()
+
+st.caption("地図をクリックして沿岸の地点を選択")
+
+if "selected" not in st.session_state:
+    st.session_state.selected = None
+
+base_img = base_map_image(grid, st.session_state.selected)
+coords = streamlit_image_coordinates(base_img, key="map_click")
+
+if coords is not None:
+    px, py = coords["x"], coords["y"]
+    col = px // UPSCALE
+    row = GRID_N - 1 - py // UPSCALE  # 画像は上端がrow大、グリッドはrow0が南(下)
+    row = int(np.clip(row, 0, GRID_N - 1))
+    col = int(np.clip(col, 0, GRID_N - 1))
+
+    snapped = snap_to_coastal(row, col, grid)
+    if snapped is None:
+        st.warning("近くに沿岸が見つかりませんでした。海岸に近い場所を選んでください。")
+    else:
+        s_row, s_col, dist_px = snapped
+        # if dist_px > 0:
+        #     st.caption(f"最寄りの沿岸(約{dist_px * 0.23:.0f}km先)に補正しました。")
+        st.session_state.selected = (s_row, s_col)
+
+if st.session_state.selected is not None:
+    row, col = st.session_state.selected
+    with st.spinner("推論中..."):
+        gaussian, prob = predict(mode, row, col, grid)
+    title = "predicted beaching distribution" if mode == "forward" else "predicted responsibility"
+    fig = prediction_figure(gaussian, prob, grid["land_mask"], title)
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=110)
+    plt.close(fig)
+    st.image(buf)

@@ -149,15 +149,14 @@ def to_rgba(values, land_mask, threshold, cmap_name="Purples", cmap_floor=CMAP_F
     return rgba, norm, cmap
 
 
-def base_map_image(grid, selected=None):
+def base_map_image(grid):
     """クリック用のベタ塗り画像。matplotlibの軸・余白を一切含めない
-    (ピクセル座標がそのままrow/colに対応するようにするため)。"""
+    (ピクセル座標がそのままrow/colに対応するようにするため)。
+    選択済みの地点は下の結果カード(prediction_figureのinput point)で
+    確認できるので、ここではマーカーを重ねない。"""
     land_mask = grid["land_mask"]
     rgba = np.where(land_mask[..., None], np.array(LAND_COLOR), np.array((1, 1, 1, 1)))
     rgba = (rgba * 255).astype(np.uint8)
-    if selected is not None:
-        r, c = selected
-        rgba[max(0, r - 1):r + 2, max(0, c - 1):c + 2] = (220, 20, 20, 255)
     img = Image.fromarray(np.flipud(rgba), mode="RGBA")  # row0=南なので画像的には下→上下反転
     img = img.resize((GRID_N * UPSCALE, GRID_N * UPSCALE), Image.NEAREST)
     return img
@@ -187,13 +186,101 @@ def prediction_figure(gaussian, prob, land_mask, title):
 # UI
 # =====================================================================
 st.set_page_config(page_title="TRACE", layout="centered")
-st.title("TRACE")
+
+# 画面上部にタイトル+モード切替を固定表示するためのCSS。
+# st.container(key=...)がこのstreamlitバージョン(1.38.0)に無く、構造的な
+# セレクタ(nth-child等)はStreamlitの内部構造をたまたま拾ってページ全体を
+# 覆ってしまったので、確実に一意な要素だけを直接狙う方式にする:
+#   - タイトルは st.title() をやめて、自分で書いたHTMLの<div>を固定表示
+#   - モード切替は div[data-testid="stRadio"] がページ内に1つしか無いことを
+#     利用して、それ自体に直接 position:fixed をかける
+# Streamlit標準のヘッダー(Deployボタン等の帯)は自作ヘッダーの上に被って
+# TRACEの文字を隠してしまうため非表示にする。
+st.markdown(
+    """
+    <style>
+    header[data-testid="stHeader"] { display: none; }
+
+    .trace-header {
+        position: fixed;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        max-width: 730px;
+        z-index: 9999;
+        background: rgba(250, 250, 250, 0.75);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        padding: 16px 24px 0 24px;
+        box-sizing: border-box;
+        text-align: center;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: rgb(49, 51, 63);
+    }
+
+    div[data-testid="stRadio"] {
+        position: fixed;
+        top: 56px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        max-width: 730px;
+        z-index: 9999;
+        background: rgba(250, 250, 250, 0.75);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        padding: 8px 24px 14px 24px;
+        box-sizing: border-box;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    }
+    /* モード切替をガラス風セグメントコントロールに */
+    div[data-testid="stRadio"] > div[role="radiogroup"] {
+        display: flex;
+        background: rgba(120, 120, 128, 0.12);
+        backdrop-filter: blur(10px);
+        border-radius: 999px;
+        padding: 3px;
+        gap: 2px;
+    }
+    div[data-testid="stRadio"] label {
+        flex: 1;
+        justify-content: center;
+        margin: 0;
+        padding: 7px 10px;
+        border-radius: 999px;
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+        cursor: pointer;
+    }
+    /* ネイティブのラジオ丸印は非表示にして、テキストだけのピルにする */
+    div[data-testid="stRadio"] label > div:first-child {
+        display: none;
+    }
+    div[data-testid="stRadio"] label:has(input:checked) {
+        background: rgba(255, 255, 255, 0.95);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+    div[data-testid="stRadio"] label p {
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    /* 固定ヘッダーの下に隠れる分だけ本文側に空白を確保する */
+    .header-spacer {
+        height: 120px;
+    }
+    </style>
+    <div class="trace-header">TRACE</div>
+    """,
+    unsafe_allow_html=True,
+)
 
 mode_label = st.radio(
     "モード", ["順モデル(放出点 → 漂着分布)", "逆モデル(観測点 → 責任マップ)"],
-    horizontal=True,
+    horizontal=True, label_visibility="collapsed",
 )
 mode = "forward" if mode_label.startswith("順") else "backward"
+st.markdown('<div class="header-spacer"></div>', unsafe_allow_html=True)
 
 grid = load_grid()
 
@@ -202,7 +289,7 @@ st.caption("地図をクリックして沿岸の地点を選択")
 if "selected" not in st.session_state:
     st.session_state.selected = None
 
-base_img = base_map_image(grid, st.session_state.selected)
+base_img = base_map_image(grid)
 coords = streamlit_image_coordinates(base_img, key="map_click")
 
 if coords is not None:
@@ -217,8 +304,6 @@ if coords is not None:
         st.warning("近くに沿岸が見つかりませんでした。海岸に近い場所を選んでください。")
     else:
         s_row, s_col, dist_px = snapped
-        # if dist_px > 0:
-        #     st.caption(f"最寄りの沿岸(約{dist_px * 0.23:.0f}km先)に補正しました。")
         st.session_state.selected = (s_row, s_col)
 
 if st.session_state.selected is not None:

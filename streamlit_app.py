@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 GRID_N = 128
 SIGMA_PX = 1.0
-UPSCALE = 4  # クリック用の表示画像の拡大率(128 -> 512px)
+UPSCALE = 6  # クリック用の表示画像の拡大率(128 -> 768px)。wideレイアウトに合わせて拡大
 
 # =====================================================================
 # forward/ と backward/ は同じファイル名(main.py, dataset.py, losses.py,
@@ -169,7 +169,7 @@ def prediction_figure(gaussian, prob, land_mask, title):
     prob_rgba, prob_norm, prob_cmap = to_rgba(
         prob_log, land_mask, threshold=np.log1p(uniform_baseline * 1000)
     )
-    fig, axes = plt.subplots(1, 2, figsize=(9, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.6))
     axes[0].imshow(gaussian_rgba, origin="lower")
     axes[0].set_title("input point")
     axes[0].set_xticks([]); axes[0].set_yticks([])
@@ -185,7 +185,7 @@ def prediction_figure(gaussian, prob, land_mask, title):
 # =====================================================================
 # UI
 # =====================================================================
-st.set_page_config(page_title="TRACE", layout="centered")
+st.set_page_config(page_title="TRACE", layout="wide")
 
 # 画面上部にタイトル+モード切替を固定表示するためのCSS。
 # st.container(key=...)がこのstreamlitバージョン(1.38.0)に無く、構造的な
@@ -264,10 +264,30 @@ st.markdown(
     div[data-testid="stRadio"] label p {
         font-size: 0.85rem;
         font-weight: 500;
+        color: rgb(49, 51, 63) !important;
     }
     /* 固定ヘッダーの下に隠れる分だけ本文側に空白を確保する */
     .header-spacer {
         height: 120px;
+    }
+    /* wideレイアウトの余白を切り詰めつつ、地図・結果画像は中央寄せにする */
+    div[data-testid="stAppViewBlockContainer"] {
+        max-width: 1100px;
+        padding-left: 3rem;
+        padding-right: 3rem;
+        margin: 0 auto;
+    }
+    /* streamlit_image_coordinatesはiframeの中に画像を描画するが、iframe自体は
+    親要素の全幅を取ってしまい、画像はその中で左寄せになる。iframeの方を
+    画像の実サイズ(UPSCALE*128px)に縮めてから中央寄せする。 */
+    iframe {
+        width: 768px !important;
+        display: block !important;
+        margin: 0 auto !important;
+    }
+    div[data-testid="stImage"] {
+        display: flex;
+        justify-content: center;
     }
     </style>
     <div class="trace-header">TRACE</div>

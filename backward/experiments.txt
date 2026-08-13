@@ -40,4 +40,71 @@ bexp03 — LR再探索 (sweep_lr.py, 候補: 3e-4, 1e-3, 3e-3, 1e-2)
     LR=3e-4  best_val=6.080480  train@best=3.772837  gap=2.307643
   判断: LR=3e-3が最良(順モデルと同じ値)。変更なし。次はweight_decay再探索(bexp04へ)。
 
+bexp04 — weight decay再探索 (sweep_wd.py, 候補: 0, 1e-5, 1e-4, 1e-3, 1e-2)
+  config: bexp03がベース(seed=42, LR=3e-3, IN_CH=3, BASE_CH=32, LOSS_FN=cross_entropy,
+          PATIENCE=15)、weight_decayだけ変える
+  結果:
+    wd=1e-5  best_val=4.815343  train@best=3.849334  gap=0.966010  ← 最良
+    wd=1e-4  best_val=4.836559  train@best=4.076334  gap=0.760225  (gap最小)
+    wd=0     best_val=5.149137  train@best=3.818938  gap=1.330198
+    wd=1e-3  best_val=5.191051  train@best=4.205179  gap=0.985872  (bexp02/03そのもの)
+    wd=1e-2  best_val=5.349412  train@best=4.525557  gap=0.823855
+  判断: forwardの最良値(wd=1e-3)は逆モデルではむしろ悪い方(下から2番目)。
+        wd=1e-5が最良。bexp02(出力のガウシアンぼかし)で既にgapの大部分を
+        削減できていたため、順モデルほど強い正則化が不要だったと解釈できる。
+        wd=1e-5を採用。
+
+bexp05 — base_ch(モデルサイズ)再探索 (sweep_basech.py, 候補: 16, 24, 32, 48)
+  config: bexp04がベース(seed=42, LR=3e-3, WEIGHT_DECAY=1e-5, IN_CH=3,
+          LOSS_FN=cross_entropy, PATIENCE=15)、base_chだけ変える
+  結果:
+    base_ch=32  best_val=4.815343  train@best=3.849334  gap=0.966010  ← 最良(bexp04そのもの)
+    base_ch=24  best_val=5.279688  train@best=4.007742  gap=1.271946
+    base_ch=48  best_val=5.329934  train@best=3.868104  gap=1.461831
+    base_ch=16  best_val=5.489431  train@best=3.805466  gap=1.683965
+  判断: 「496サンプルに対してbase_ch=32(forward流用)は大きすぎるのでは」という仮説は
+        外れ。小さくしても(16, 24)大きくしても(48)悪化し、32が既にちょうど良かった。
+        変更なし。
+
+bexp06 — n_originsで層化したsplit (make_split_backward.py修正)
+  config: bexp05がベース(seed=42, LR=3e-3, WEIGHT_DECAY=1e-5, BASE_CH=32,
+          LOSS_FN=cross_entropy, PATIENCE=15)。splitのやり方だけ変更:
+          n_origins==1(自明, 292セル)とn_origins>=2(本題, 325セル)を別プールにして
+          プールごとに独立して地理クラスタリング+分割してから合体(easy 14クラスタ,
+          hard 16クラスタ)。従来は地理クラスタのみで割っていて、たまたまtestに
+          自明ケースが偏っていた(train/val平均n_origins 2.3〜2.4に対しtestは1.4)
+  結果: train 516 / val 77 / test 24 (avg n_origins: 2.28 / 2.38 / 1.75)。
+        best val=4.569350(train@best=4.141649, gap=0.427701)。
+  判断: val lossがbexp05(4.815)より改善(4.569)、gapも縮小(0.966→0.428)。ただしval
+        セット自体の構成が変わっているので、単純比較はできない点に注意
+        (「モデルが良くなった」というより「評価の偏りが減った」効果が主)。
+        test件数が減ったのはトレードオフとして許容。採用。
+
+bexp07 — masked softmax(originは必ず沿岸、という制約をモデルに組み込む)
+  背景: predict_point.pyで任意点を推論した際、確率質量の平均76%が「陸に接してない
+        海セル」に漏れていることが判明。cross_entropyは正解がある場所の確率さえ
+        高ければよく、それ以外にどれだけ確率を撒いても罰則が無いため。
+  実装: forward/losses.pyのto_prob_map/cross_entropy_loss/weighted_mse_lossに
+        mask引数を追加(softmax前に非許可セルのロジットを-infにするmasked softmax)。
+        backward/dataset.pyにload_coastal_mask()を追加(land_maskをbinary_dilation
+        して「陸に接する海セル」を計算)。backward/train.py, evaluate.pyでこの
+        マスクをlossに渡すよう変更。forward側はmask=None(未指定)のままなので
+        順モデルの挙動・重みは一切変わっていない。
+  1回目の失敗: 単純にモデル側だけmaskしたら val loss が4.57→13.5に悪化(gapも負に)。
+        原因: 正解Y(ガウシアンぼかし済み)の方は沿岸マスクを考慮しておらず、
+        平均73%のY質量が陸/非沿岸セルに漏れていた。モデルはそこに確率を
+        置けなくなった(強制0)のに、正解はそこに値を要求する、という
+        原理的に達成不可能な矛盾が生じていた。
+  修正: build_backward_pairs.pyで、Yをガウシアンぼかしした後にも沿岸マスクで
+        切り落として再正規化するよう変更。粗い128グリッド上でorigin自体が
+        非沿岸判定になるエッジケース(30/617セル)は当該セルごと除外。
+        587セットに減った分、splitのクラスタ数を30→45に増やして再分割
+        (490/59/38)。
+  結果: best val=3.166064(train@best=2.269371, gap=0.896693)。bexp06(4.569)より改善。
+  注意: 候補セル数が減った分、問題の難度自体が構造的に下がっている面もあるので、
+        単純な数値比較は完全にはフェアではない。ただし「意味のない場所への
+        確率の漏れ」が解消された実質的な改善ではある。
+  現状のベスト構成: seed=42, LR=3e-3, WEIGHT_DECAY=1e-5, IN_CH=3, BASE_CH=32,
+        LOSS_FN=cross_entropy, DROPOUT_P=0.0, masked softmax(沿岸のみ)有効
+
 (以降、この下に追記していく)

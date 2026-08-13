@@ -12,7 +12,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import BackwardDataset
+from dataset import BackwardDataset, load_coastal_mask
 from main import AttentionUNet
 from losses import cross_entropy_loss, weighted_mse_loss
 
@@ -22,7 +22,7 @@ from losses import cross_entropy_loss, weighted_mse_loss
 SEED = 42
 BATCH_SIZE = 16
 LR = 3e-3
-WEIGHT_DECAY = 1e-3
+WEIGHT_DECAY = 1e-5        # bexp04: sweepで最良(forwardの1e-3はむしろ悪化した)
 EPOCHS = 100
 IN_CH = 3                  # [観測点ガウシアン, 平均u, 平均v]
 BASE_CH = 32
@@ -36,13 +36,14 @@ SCHED_PATIENCE = 5
 CKPT_PATH = Path(__file__).resolve().parent / "best_model.pt"
 
 DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+COASTAL_MASK = load_coastal_mask().to(DEVICE)  # originは必ず沿岸のはず、というmasked softmax制約
 
 
 def compute_loss(logits, y, valid):
     if LOSS_FN == "weighted_mse":
-        return weighted_mse_loss(logits, y, alpha=ALPHA)
+        return weighted_mse_loss(logits, y, alpha=ALPHA, mask=COASTAL_MASK)
     elif LOSS_FN == "cross_entropy":
-        return cross_entropy_loss(logits, y, valid=valid)
+        return cross_entropy_loss(logits, y, valid=valid, mask=COASTAL_MASK)
     raise ValueError(f"unknown LOSS_FN: {LOSS_FN}")
 
 

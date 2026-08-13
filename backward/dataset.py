@@ -22,6 +22,19 @@ DEFAULT_NPZ = DATA_DIR / "backward_pairs.npz"
 DEFAULT_CURRENT_NPZ = DATA_DIR / "current_field.npz"
 
 
+def load_coastal_mask(current_npz_path=DEFAULT_CURRENT_NPZ):
+    """originは必ず沿岸(陸に接した海セル)のはず(release_site.pyがland maskから
+    沿岸セルだけを抽出して300地点を作っている)。このmaskをmasked softmaxに使うと、
+    モデルが非沿岸セルに確率を漏らせなくなる(predict_point.pyで発見した問題への対応)。
+    戻り値は(128,128)のbool tensor、Trueが「確率を置いてよいセル」。"""
+    from scipy.ndimage import binary_dilation
+
+    c = np.load(current_npz_path)
+    land = c["land_mask"]
+    coastal = binary_dilation(land) & ~land
+    return torch.from_numpy(coastal)
+
+
 class BackwardDataset(Dataset):
     def __init__(self, split, npz_path=DEFAULT_NPZ, current_npz_path=DEFAULT_CURRENT_NPZ):
         d = np.load(npz_path)

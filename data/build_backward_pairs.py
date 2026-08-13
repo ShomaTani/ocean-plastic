@@ -26,15 +26,23 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import binary_dilation, gaussian_filter
 
 GLORYS_FILE = "raw/glorys_2018_2022_surface_uovo.nc"
+CURRENT_FIELD_NPZ = "current_field.npz"
 DIM_LON, DIM_LAT = "longitude", "latitude"
 DENSITY_MAP_NPY = "density_maps_beach.npy"
 RELEASE_SITES_CSV = "release_sites_used.csv"
 GRID_N = 128
 SIGMA_PX = 1.0        # inputdata_dim.pyと同じ値(入力側のガウシアンの広がり)
 OUT_FILE = "backward_pairs.npz"
+
+# originは必ず沿岸(陸に接した海セル)のはず。backward/train.pyのmasked softmaxが
+# 「非沿岸セルの確率は厳密に0」という制約をモデルにかけるので、正解Y側もこの
+# 制約に合わせておかないと、モデルが原理的に再現不可能な正解を要求してしまう
+# (実際、ガウシアンぼかし後のYは平均73%が沿岸マスクの外に漏れていた — 要修正)
+_land = np.load(CURRENT_FIELD_NPZ)["land_mask"]
+COASTAL_MASK = binary_dilation(_land) & ~_land
 
 # =====================================================================
 # 1. グリッド定義(sim_main.py / inputdata_dim.pyと同じ)を再現
@@ -77,6 +85,7 @@ print("[3] building input/output pairs ...")
 X_gaussian = np.zeros((n_cells, GRID_N, GRID_N), dtype=np.float32)
 Y_resp = np.zeros((n_cells, GRID_N, GRID_N), dtype=np.float32)
 n_contrib = np.zeros(n_cells, dtype=np.int32)
+keep = np.ones(n_cells, dtype=bool)
 
 for k in range(n_cells):
     r, c = obs_rows[k], obs_cols[k]
@@ -102,7 +111,23 @@ for k in range(n_cells):
     # (ガウシアン畳み込みは線形なので、点を先に足してから1回ぼかすのと
     #  各点を個別にぼかしてから足すのは数学的に同じ)
     blurred = gaussian_filter(point_mass, sigma=SIGMA_PX, mode="constant")
-    Y_resp[k] = (blurred / blurred.sum()).astype(np.float32)
+    # ぼかしは陸/非沿岸にもお構いなしに広がるので、沿岸マスクで切り落として
+    # から再正規化する(masked softmaxをかけたモデルの出力空間と揃える)。
+    # 粗い128グリッド上ではoriginの位置自体が非沿岸判定になるエッジケースが
+    # まれにあり(release_site.pyは元のGLORYS解像度で沿岸判定しているため)、
+    # その場合ここでblurred.sum()==0になる。そのセルは丸ごと除外する。
+    blurred = np.where(COASTAL_MASK, blurred, 0.0)
+    total_mass = blurred.sum()
+    if total_mass <= 0:
+        keep[k] = False
+        continue
+    Y_resp[k] = (blurred / total_mass).astype(np.float32)
+
+n_dropped = (~keep).sum()
+if n_dropped:
+    print(f"    沿岸マスク起因で{n_dropped}セルを除外")
+    X_gaussian, Y_resp = X_gaussian[keep], Y_resp[keep]
+    obs_rows, obs_cols, n_contrib = obs_rows[keep], obs_cols[keep], n_contrib[keep]
 
 # =====================================================================
 # 4. 保存

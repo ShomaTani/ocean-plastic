@@ -22,7 +22,7 @@ from sklearn.cluster import KMeans
 IN_FILE  = "train_pairs.npz"
 OUT_FILE = "train_pairs.npz"   # 上書き保存(splitを追加した完全版に置き換える)
 
-N_CLUSTERS  = 18            # 地理クラスタ数。多いほど地域偏りは減るがクラスタが小さくなる
+N_CLUSTERS  = 32            # 500地点に増量した際、18だと粗すぎてtestが0件になったため増やした
 SPLIT_RATIO = (0.8, 0.1, 0.1)  # train, val, test の目標割合(クラスタ単位なので厳密には一致しない)
 SEED        = 42            # KMeansの初期化とクラスタのシャッフルを固定するための乱数シード
 

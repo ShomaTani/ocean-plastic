@@ -99,10 +99,13 @@ def to_rgba(values, land_mask, threshold, cmap_name="Purples", cmap_floor=CMAP_F
 
 gaussian_rgba, _, _ = to_rgba(gaussian, land_mask, threshold=0.0)
 
+# forward/predict_point.pyと同じ理由(softmaxの背景ノイズを除去するため)で
+# 一様分布の10倍を閾値にする
+THRESHOLD_MULTIPLIER = 10
 uniform_baseline = 1.0 / (GRID_N * GRID_N)
 prob_log = np.log1p(prob * 1000)
 prob_rgba, prob_norm, prob_cmap = to_rgba(
-    prob_log, land_mask, threshold=np.log1p(uniform_baseline * 1000)
+    prob_log, land_mask, threshold=np.log1p(uniform_baseline * THRESHOLD_MULTIPLIER * 1000)
 )
 
 fig, axes = plt.subplots(1, 2, figsize=(11, 5))

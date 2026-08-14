@@ -162,12 +162,15 @@ def base_map_image(grid):
     return img
 
 
+THRESHOLD_MULTIPLIER = 10  # softmaxの背景ノイズを除去するため一様分布の10倍を閾値にする
+
+
 def prediction_figure(gaussian, prob, land_mask, title):
     gaussian_rgba, _, _ = to_rgba(gaussian, land_mask, threshold=0.0)
     uniform_baseline = 1.0 / (GRID_N * GRID_N)
     prob_log = np.log1p(prob * 1000)
     prob_rgba, prob_norm, prob_cmap = to_rgba(
-        prob_log, land_mask, threshold=np.log1p(uniform_baseline * 1000)
+        prob_log, land_mask, threshold=np.log1p(uniform_baseline * THRESHOLD_MULTIPLIER * 1000)
     )
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.6))
     axes[0].imshow(gaussian_rgba, origin="lower")
@@ -288,6 +291,12 @@ st.markdown(
     div[data-testid="stImage"] {
         display: flex;
         justify-content: center;
+    }
+    /* 「地図をクリックして...」の説明文を、下の地図(768px, 中央寄せ)と
+    左端が揃うように、同じ幅で中央寄せする */
+    div[data-testid="stCaptionContainer"] {
+        max-width: 768px;
+        margin: 0 auto;
     }
     </style>
     <div class="trace-header">TRACE</div>

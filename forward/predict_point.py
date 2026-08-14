@@ -107,10 +107,15 @@ def to_rgba(values, land_mask, threshold, cmap_name="Purples", cmap_floor=CMAP_F
 
 gaussian_rgba, _, _ = to_rgba(gaussian, land_mask, threshold=0.0)
 
+# softmaxは数学的に厳密な0を出せないので、「一様分布と同水準の値」まで
+# 律儀に色をつけると、実質ノイズに近い薄い帯が沿岸全体に伸びて見える
+# (質量の87%は基準値5倍以上のセルだけでカバーできる)。基準値の10倍を
+# 閾値にすることで、背景ノイズを削って本当に意味のある集中箇所だけ見せる。
+THRESHOLD_MULTIPLIER = 10
 uniform_baseline = 1.0 / (GRID_N * GRID_N)  # 一様分布ならこの値になるはず
 prob_log = np.log1p(prob * 1000)
 prob_rgba, prob_norm, prob_cmap = to_rgba(
-    prob_log, land_mask, threshold=np.log1p(uniform_baseline * 1000)
+    prob_log, land_mask, threshold=np.log1p(uniform_baseline * THRESHOLD_MULTIPLIER * 1000)
 )
 
 fig, axes = plt.subplots(1, 2, figsize=(11, 5))

@@ -1,0 +1,5 @@
+﻿edge,n,pct_of_exits,mean_exit_day,median_exit_day,mean_origin_dist_to_edge_deg,pct_likely_artifact,pct_of_all_particles,mean,median,std,pct_inward_or_zero(%)
+"East(150E, 黒潮続流側)",9778,66.89,31.36,26.0,7.58,6.14,9.778,30.3,22.61,26.14,0.0
+North(50N),222,1.52,0.64,1.0,0.05,100.0,0.222,6.35,6.02,2.83,0.0
+South(25N),2937,20.09,39.08,37.0,4.23,7.73,2.937,15.0,13.24,10.9,0.0
+"West(120E, 東シナ海側)",1680,11.49,7.37,5.0,0.69,70.89,1.68,8.6,6.18,7.23,0.0

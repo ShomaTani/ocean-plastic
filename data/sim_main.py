@@ -1,13 +1,6 @@
 
 """
-TRACE — 小規模疎通テスト (10地点 × 10粒子 × 30日)
-素の OceanParcels (parcels 3.x) で CMEMS GLORYS12V1 を直読み。
-
-目的: 「粒子放流 → 移流 + beaching → .zarr 出力 → 密度マップ変換」の
-      全工程を一度末端まで流し、本番バッチ(④)前に落とし穴を潰す。
-
-このテストが通れば、④は RELEASE_SITES を ~300 点に、N_PER_SITE と
-RUNTIME_DAYS を増やすだけでそのままスケールする。
+シミュレータ本体
 
 依存: pip install parcels xarray zarr netcdf4   (matplotlib は任意)
 """
@@ -20,9 +13,7 @@ from datetime import timedelta
 from parcels import (FieldSet, ParticleSet, JITParticle, Variable,
                      StatusCode, Field)
 
-# =====================================================================
 # CONFIG — ここだけ自分の環境に合わせて編集
-# =====================================================================
 GLORYS_FILE = "raw/glorys_2018_2022_surface_uovo.nc"   # DL済み GLORYS12V1 NetCDF のパス
 VAR_U, VAR_V = "uo", "vo"              # 表層東西/南北流速の変数名 (GLORYS 既定)
 DIM_LON, DIM_LAT = "longitude", "latitude"   # 座標名 (GLORYS 既定)
@@ -65,9 +56,7 @@ _sites_df = pd.read_csv(RELEASE_SITES_CSV)
 RELEASE_SITES = list(zip(_sites_df["lon"], _sites_df["lat"]))
 print(f"    loaded {len(RELEASE_SITES)} release sites from {RELEASE_SITES_CSV}")
 
-# =====================================================================
 # 1. GLORYS を開いて座標・land mask・表層深度を取得
-# =====================================================================
 print("[1] loading GLORYS ...")
 ds0 = xr.open_dataset(GLORYS_FILE)
 lons = ds0[DIM_LON].values
@@ -88,9 +77,7 @@ if lats[0] > lats[-1]:
     lats = lats[::-1]
     land = land[::-1, :]
  
-# =====================================================================
 # 2. FieldSet 構築 + land mask を単位変換なしの別フィールドとして追加
-# =====================================================================
 print("[2] building fieldset ...")
 filenames  = {"U": GLORYS_FILE, "V": GLORYS_FILE}
 variables  = {"U": VAR_U, "V": VAR_V}
@@ -132,9 +119,7 @@ if USE_WINDAGE:
 else:
     print("    (ERA5_FILE=None のため windage 無効: 海流のみで移流)")
  
-# =====================================================================
 # 3. 放流地点を海セルに限定し、ジッタを付けて粒子配列を生成
-# =====================================================================
 def nearest(arr, v):
     return int(np.abs(arr - v).argmin())
  
@@ -147,8 +132,6 @@ for k, (lo, la) in enumerate(RELEASE_SITES):
         print(f"    ! site {k} ({lo},{la}) is on land — skipped")
         continue
     # ジッタ後の座標が陸に落ちていないか1粒子ずつ検証する。
-    # (地点の中心座標だけ陸判定しても、ジッタ(JITTER_DEG)がグリッド1マス分
-    #  近いため、ジッタ後に隣の陸セルへ飛んでしまうケースがあるため)
     n_ok = 0
     n_try = 0
     max_try = N_PER_SITE * 20  # 無限ループ防止
@@ -171,9 +154,7 @@ if n_resampled_total > 0:
     print(f"    (ジッタが陸に落ちて再サンプリングした回数: {n_resampled_total} "
           f"— これが多いほど、修正前は誤beachingが多かったはず)")
  
-# =====================================================================
 # 4. 粒子クラス + カーネル (合成フィールドで検証済み)
-# =====================================================================
 class Plastic(JITParticle):
     beached     = Variable("beached",     dtype=np.int32,   initial=0)  # 陸マスクに接触=本当の漂着
     left_domain = Variable("left_domain", dtype=np.int32,   initial=0)  # 領域外に出て追跡不能
@@ -201,10 +182,6 @@ def AdvectBeach(particle, fieldset, time):          # 漂着済み/領域外は�
  
 def Windage(particle, fieldset, time):
     # 風圧流。海面に浮く物体は風速の数%で風下に押される。
-    # 日本海横断のような長距離輸送は海流だけでは再現されず、
-    # 冬季季節風によるこの項の寄与が大きいとされる。
-    # 注意: U10/V10 は mesh='flat' なので生の m/s。度/s へ手動換算が必要。
-    # (fieldset.UV と違い parcels の自動単位変換が効かない)
     if particle.beached == 0 and particle.left_domain == 0:
         uw = fieldset.U10[time, particle.depth, particle.lat, particle.lon]
         vw = fieldset.V10[time, particle.depth, particle.lat, particle.lon]
@@ -230,9 +207,7 @@ def Recover(particle, fieldset, time):
         particle.left_domain = 1
         particle.state = StatusCode.Success
  
-# =====================================================================
 # 5. 実行
-# =====================================================================
 print("[5] running simulation ...")
 # windage係数を粒子ごとにランダム付与(物体の種類の違いを表現し、拡がりも出す)
 pwindage = rng.uniform(WINDAGE_MIN, WINDAGE_MAX, plon.size).astype(np.float32)
@@ -255,12 +230,10 @@ pset.execute(kernels,
              dt=timedelta(minutes=DT_MIN),
              output_file=pfile)
  
-# =====================================================================
 # 6. 後処理: 軌跡 → origin ごとの漂着密度マップ (学習データ本体)
 #    集計対象は2種類を両方保存して比較できるようにする:
 #      - all   : 全粒子(浮遊中も含む)の最終位置
 #      - beach : 漂着済み(beached==1)の粒子のみ
-# =====================================================================
 print("[6] building per-origin density maps (all & beached-only) ...")
 ds = xr.open_zarr(OUT_ZARR)
 flon = ds.lon.isel(obs=-1).values
@@ -269,8 +242,6 @@ beached     = ds.beached.isel(obs=-1).values
 left_domain = ds.left_domain.isel(obs=-1).values
 origin      = ds.origin.values
  
-# 領域外に出た粒子(left_domain==1)は「境界で凍結された位置」であって物理的な
-# 意味を持たないため、all/beach 両方の密度マップから除外する。
 in_domain = (left_domain == 0)
  
 gx = np.linspace(float(lons.min()), float(lons.max()), GRID_N + 1)
@@ -347,9 +318,7 @@ else:
  
 H = maps_all[plot_origin] if plot_origin is not None else np.zeros((GRID_N, GRID_N))
  
-# =====================================================================
 # 7. 合否チェック — ここが全部 OK なら本番バッチへ進んでよい
-# =====================================================================
 start_lon = ds.lon.isel(obs=0).values
 disp = np.hypot(flon - start_lon, flat - ds.lat.isel(obs=0).values)
 print("\n===== PASS CHECK =====")
@@ -369,7 +338,7 @@ if (beach_frac_by_site == 0).sum() > n_sites * 0.3:
     print("  !! 3割超のoriginで漂着ゼロ → RUNTIME_DAYSを延ばすか、beaching判定を確認")
 print("======================")
  
-# 任意: 実際に粒子のあるoriginでの all/beach 比較プロット
+# 実際に粒子のあるoriginでの all/beach 比較プロット
 try:
     if plot_origin is None:
         raise RuntimeError("有効なoriginが無いためプロットをスキップ")

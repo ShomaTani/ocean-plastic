@@ -4,9 +4,6 @@
   - Floating  : beached==0 & left_domain==0 (領域内をまだ漂流中)
   - Out of range : left_domain==1 (シミュレーション領域(E120-150,N25-50)を離脱)
 
-全体の割合、および起源地域別(Korea/China/China_NE-Russia/Japan/Other)の内訳を
-表と棒グラフにまとめる。
-
 使い方:
   python analyze_fate_ratios.py [--zarr trace_run.zarr]
 """

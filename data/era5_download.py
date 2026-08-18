@@ -13,14 +13,6 @@ GLORYSと同じ領域(東経120-150, 北緯25-50)・期間(2018-2022)に合わ�
      (https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=download#manage-licences)
 
 使い方: python download_era5_wind.py
-
-この request 本体は CDS の Web フォームで "Show API request" から
-生成したものをそのまま使っている(うろ覚えで書くと新CDSの仕様変更で
-落ちるため、フォーム生成のものを正とする)。
-
-"download_format": "unarchived" を指定しているため、通常は zip化されず
-単一の.ncファイルで返ってくる。念のため、万一zipで返ってきた場合の
-解凍・マージ処理も保険として残してある。
 """
 import zipfile
 import shutil

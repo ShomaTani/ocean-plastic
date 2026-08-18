@@ -1,6 +1,5 @@
 """
 GLORYS 表層海流の可視化: 速さ(ヒートマップ) + 向き(矢印)
-発表スライド用。matplotlib のみで完結(cartopy不要)。
 
 使い方:
   python plot_currents.py <ncファイル> [--time 0] [--out current_map.png]

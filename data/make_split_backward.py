@@ -1,28 +1,13 @@
 """
-TRACE — 逆モデル用 train / val / test 分割 (地理クラスタ単位 + n_origins層化)
+逆モデル用 train / val / test 分割 (地理クラスタ単位 + n_origins層化)
 
-make_split.py と同じ発想(地理クラスタリング + クラスタ単位分割でリークを防ぐ)を
-backward_pairs.npzに適用する。それに加えて、n_origins==1(自明な単一origin問題)と
-n_origins>=2(複数originの切り分けが本題)を別々にクラスタリング・分割してから
-合体させることで、train/val/testそれぞれに両方のタイプが比例して入るようにする。
-(素朴に地理クラスタだけで割ると、testに自明ケースばかり/本題ケースばかり
- 偏って集まる回があり、実際に前回はtestの平均n_originsだけ明らかに低かった)
-
-季節データ拡張(build_backward_pairs.py参照)により、同じ観測セル(row, col)が
-複数の放出日(年)分のサンプルとして重複しうる。同じセルが年違いでtrain/testに
-またがるとリークになるため、(row, col) 単位でユニーク化してからクラスタリング
-する。n_origins は年によって変わりうる(同じセルでもある年は1originのみ、
-別の年は2origin以上、ということがある)ため、easy/hardプールの判定は
-「そのセルが5年間で一度でもn_origins>=2だったか」で決める(=hard優先。
-一度でも複数origin問題になり得るセルは、より本題に近い"hard"として扱う)。
+make_split.py と同じ発想(地理クラスタリング + クラスタ単位分割でリークを防ぐ)
 """
 
 import numpy as np
 from sklearn.cluster import KMeans
 
-# =====================================================================
 # CONFIG
-# =====================================================================
 IN_FILE  = "backward_pairs.npz"
 OUT_FILE = "backward_pairs.npz"
 
@@ -62,9 +47,7 @@ def assign_split(lon, lat, n_clusters, seed):
     return split, cluster_id
 
 
-# =====================================================================
 # 1. 既存のペアデータを読み込み、(row, col) 単位でユニーク化する
-# =====================================================================
 print("[1] loading backward_pairs.npz ...")
 d = dict(np.load(IN_FILE))
 row, col, lon, lat, n_origins = d["row"], d["col"], d["lon"], d["lat"], d["n_origins"]
@@ -83,9 +66,7 @@ for i, key in enumerate(uniq_key):
     uniq_hard[i] = (n_origins[cell_key == key] >= 2).any()
 print(f"    hard(一度でも複数origin) = {uniq_hard.sum()}, easy(全年で単一origin) = {(~uniq_hard).sum()}")
 
-# =====================================================================
 # 2. ユニークセルを easy/hard プールに分け、プールごとに独立してクラスタリング+分割する
-# =====================================================================
 cell_split = np.empty(n_cells, dtype=object)
 cell_cluster = np.empty(n_cells, dtype=np.int32)
 
@@ -98,18 +79,13 @@ for name, mask in [("easy", ~uniq_hard), ("hard", uniq_hard)]:
     offset = 0 if name == "easy" else 1000
     cell_cluster[mask] = sub_cluster + offset
 
-# =====================================================================
 # 3. ユニークセル -> split/cluster_id のマッピングを全放出日分の行に配り直す
-#    (同じセルは放出日が違っても必ず同じsplitに入る = リーク防止)
-# =====================================================================
 key_to_split = dict(zip(uniq_key, cell_split))
 key_to_cluster = dict(zip(uniq_key, cell_cluster))
 split = np.array([key_to_split[k] for k in cell_key]).astype(str)
 cluster_id = np.array([key_to_cluster[k] for k in cell_key])
 
-# =====================================================================
 # 4. 保存 & 内訳を表示
-# =====================================================================
 d["split"] = split
 d["cluster_id"] = cluster_id
 np.savez(OUT_FILE, **d)

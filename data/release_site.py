@@ -1,8 +1,5 @@
 """
 沿岸放流地点の自動生成
-GLORYS の land mask から海陸境界セル(=沿岸の海セル)を抽出し、
-指定数だけ間引いてサンプリングする。手打ち座標を廃止し、
-必ず海セル上に落ちる放流点リストを作る。
 
 使い方:
   python gen_release_sites.py <ncファイル> --n_sites 300 --out data/release_sites.csv

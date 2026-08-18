@@ -39,3 +39,7 @@ venv/
 .DS_Store
 .vscode/
 .claude/
+
+# ===== 開発メモ (Claude Code向けの作業ログ。外部公開しない) =====
+CLAUDE.md
+**/CLAUDE.md

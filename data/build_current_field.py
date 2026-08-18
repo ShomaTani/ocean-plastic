@@ -1,20 +1,6 @@
 """
 TRACE — 海流場チャンネルの生成(論点A 選択肢3)
 
-GLORYSの生データ(361×301, 高解像度)から時間平均 uo, vo を計算し、
-density_maps_beach.npy / train_pairs.npz と同じ128×128グリッドに平均プーリングして
-current_field*.npz に保存する。全originで共通の1枚のフィールド(site非依存)。
-
-デフォルト(引数無し)は2018-2022年全体の時間平均(静的、季節非依存)を
-current_field.npz に保存する。従来の挙動そのまま。
-
-引数で放出日(YYYY-MM-DD)を渡すと、sim_main.pyの季節データ拡張(複数年の同一
-暦日から放出)に合わせて、その日から90日間(=RUNTIME_DAYS)だけの平均を
-current_field_{date}.npz に保存する。正規化の平均・標準偏差は5年全体版
-(current_field.npz)のものに固定して使う — 各年の冬の海流場を同じスケールで
-比較できるようにするため(年ごとに別々の平均・分散で標準化すると、物理的な
-差ではなく正規化のズレが混ざってしまう)。
-
 使い方:
   python build_current_field.py                 # 従来通り: 5年全体平均
   python build_current_field.py 2019-01-01       # その90日間だけの平均(季節拡張用)
@@ -37,10 +23,8 @@ BASELINE_FILE = "current_field.npz"
 RELEASE_DATE = sys.argv[1] if len(sys.argv) > 1 else None
 OUT_FILE = f"current_field_{RELEASE_DATE}.npz" if RELEASE_DATE else BASELINE_FILE
 
-# =====================================================================
 # 1. GLORYSを開いて時間平均を取る(depth次元は1層しかないのでsqueeze)
 #    RELEASE_DATE指定時は、その日から90日間だけに絞って平均する
-# =====================================================================
 ds = xr.open_dataset(GLORYS_FILE, chunks={"time": 200})
 if RELEASE_DATE:
     t0 = np.datetime64(RELEASE_DATE)
@@ -56,16 +40,12 @@ lons = ds[DIM_LON].values
 lats = ds[DIM_LAT].values
 print(f"    u_mean shape={u_mean.shape}, nan比率={np.isnan(u_mean).mean():.2%} (陸マスク)")
 
-# =====================================================================
 # 2. sim_main.py / inputdata_dim.py と同じグリッド定義(gx, gy)を再現
-# =====================================================================
 gx = np.linspace(float(lons.min()), float(lons.max()), GRID_N + 1)
 gy = np.linspace(float(lats.min()), float(lats.max()), GRID_N + 1)
 
-# =====================================================================
 # 3. 361x301 -> 128x128 に平均プーリングでダウンサンプル
 #    NaN(陸)は平均計算から除外する。全部陸のセルはNaNのまま残る
-# =====================================================================
 print(f"[2] downsampling to {GRID_N}x{GRID_N} via block-mean ...")
 lon_grid, lat_grid = np.meshgrid(lons, lats)   # (301, 361) それぞれ
 
@@ -82,18 +62,14 @@ v_128 = downsample(v_mean)
 land_mask = np.isnan(u_128)  # 128x128グリッド上での陸マスク(全ビンが陸だったセル)
 print(f"    128x128グリッドでの陸セル比率: {land_mask.mean():.2%}")
 
-# =====================================================================
 # 4. 流速の大きさ(speed)を物理値(u,v)から先に計算しておく
 #    (標準化後のu,vから計算すると単位が混ざっておかしくなるので、この順序が重要)
-# =====================================================================
 speed_128 = np.sqrt(u_128 ** 2 + v_128 ** 2)  # land_maskのセルはnp.nanのまま伝播する
 
-# =====================================================================
 # 5. 標準化(平均0・分散1)して、陸セルは0(=海のセルの平均的な値)で埋める
 #    RELEASE_DATE指定時は、5年全体版(current_field.npz)の平均・標準偏差を
 #    そのまま使う(年ごとに別基準で正規化すると物理的な差と正規化のズレが
 #    区別できなくなるため)。無ければ先に baseline を作るよう促して終了する。
-# =====================================================================
 if RELEASE_DATE:
     if not Path(BASELINE_FILE).exists():
         raise SystemExit(

@@ -1,11 +1,6 @@
 """
 90日という追跡期間(RUNTIME_DAYS)の妥当性を検証する。
 
-beached / left_domain は一度立つとその後の全timestepで保持されるフラグなので、
-各obs(=日)時点での累積割合を追うと「まだ増え続けているか、頭打ちになっているか」が分かる。
-90日時点で新規発生率がほぼゼロまで収束していれば、期間としては妥当と言える。
-逆にまだ大きく増加中なら、90日では足りず打ち切りによる過小評価の疑いが残る。
-
 使い方:
   python analyze_duration_justification.py [--zarr trace_run.zarr]
 """

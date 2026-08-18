@@ -4,20 +4,6 @@ TRACE — 逆モデル用データ整形
 density_maps_beach_{date}.npy (origin分の漂着密度マップ) を「観測地点」視点に
 転置して、逆モデルの学習ペアを作る。新規シミュレーションは不要。
 
-考え方(ベイズ的な転置):
-  順モデルのデータは Y[origin, x] = P(x に漂着 | origin から放出)
-  ある観測セル x について全origin分の値 Y[:, x] を正規化すると、
-  P(origin | x で観測) ∝ Y[origin, x]  (全origin均等排出という前提。
-  これは既存シミュレーション自体が置いている前提と同じ — 全site一律50粒子)
-
-  この責任分布を、各originの位置に置いたガウシアンで加重合成すると、
-  「責任マップ」(128×128の空間分布, 逆モデルの正解Y)が作れる。
-
-季節データ拡張(sim_main.py参照)に対応するため、RELEASE_DATESに列挙した
-全ての放出日についてこの転置を独立に行い、結果を連結する(観測セル集合は
-放出日によって変わりうる — 同じ場所でも年によって漂着物が来る/来ないが
-変わるため)。
-
 出力: backward_pairs.npz
   X_gaussian   : (n_samples, 128, 128) float32 — 観測地点をガウシアンで滲ませた入力
   Y            : (n_samples, 128, 128) float32 — 責任マップ(sum=1)
@@ -44,16 +30,10 @@ GRID_N = 128
 SIGMA_PX = 1.0        # inputdata_dim.pyと同じ値(入力側のガウシアンの広がり)
 OUT_FILE = "backward_pairs.npz"
 
-# originは必ず沿岸(陸に接した海セル)のはず。backward/train.pyのmasked softmaxが
-# 「非沿岸セルの確率は厳密に0」という制約をモデルにかけるので、正解Y側もこの
-# 制約に合わせておかないと、モデルが原理的に再現不可能な正解を要求してしまう
-# (実際、ガウシアンぼかし後のYは平均73%が沿岸マスクの外に漏れていた — 要修正)
 _land = np.load(CURRENT_FIELD_NPZ)["land_mask"]
 COASTAL_MASK = binary_dilation(_land) & ~_land
 
-# =====================================================================
 # 1. グリッド定義(sim_main.py / inputdata_dim.pyと同じ)を再現
-# =====================================================================
 print("[1] loading grid definition and origin sites ...")
 ds0 = xr.open_dataset(GLORYS_FILE)
 lons_native = ds0[DIM_LON].values
@@ -131,9 +111,7 @@ def build_pairs_for_date(date):
     return X_gaussian, Y_resp, obs_rows, obs_cols, n_contrib
 
 
-# =====================================================================
 # 2. 放出日ごとに転置し、連結する
-# =====================================================================
 print("[2] building input/output pairs for each release date ...")
 X_list, Y_list, row_list, col_list, ncontrib_list, date_list = [], [], [], [], [], []
 for date in RELEASE_DATES:
@@ -153,9 +131,7 @@ n_contrib = np.concatenate(ncontrib_list, axis=0)
 release_date = np.concatenate(date_list, axis=0)
 print(f"    total: {len(X_gaussian)} samples ({len(RELEASE_DATES)} dates分を連結)")
 
-# =====================================================================
 # 3. 保存
-# =====================================================================
 np.savez(
     OUT_FILE,
     X_gaussian=X_gaussian,

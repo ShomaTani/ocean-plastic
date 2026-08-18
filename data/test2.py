@@ -1,12 +1,5 @@
 """
-TRACE — 小規模疎通テスト (10地点 × 10粒子 × 30日)
-素の OceanParcels (parcels 3.x) で CMEMS GLORYS12V1 を直読み。
-
-目的: 「粒子放流 → 移流 + beaching → .zarr 出力 → 密度マップ変換」の
-      全工程を一度末端まで流し、本番バッチ(④)前に落とし穴を潰す。
-
-このテストが通れば、④は RELEASE_SITES を ~300 点に、N_PER_SITE と
-RUNTIME_DAYS を増やすだけでそのままスケールする。
+小規模疎通テスト (10地点 × 10粒子 × 30日)
 
 依存: pip install parcels xarray zarr netcdf4   (matplotlib は任意)
 """
@@ -18,9 +11,7 @@ from datetime import timedelta
 from parcels import (FieldSet, ParticleSet, JITParticle, Variable,
                      StatusCode, Field)
 
-# =====================================================================
 # CONFIG — ここだけ自分の環境に合わせて編集
-# =====================================================================
 GLORYS_FILE = "/Users/shomatani/Coding/ocean-plastic/data/raw/test_glorys_2020_week1.nc"   # DL済み GLORYS12V1 NetCDF のパス
 VAR_U, VAR_V = "uo", "vo"              # 表層東西/南北流速の変数名 (GLORYS 既定)
 DIM_LON, DIM_LAT = "longitude", "latitude"   # 座標名 (GLORYS 既定)
@@ -35,23 +26,20 @@ GRID_N       = 128     # 密度マップの解像度 (最終的な NN 入出力�
 OUT_ZARR     = "trace_test.zarr"
 
 # 放流地点(暫定10点)。本番では ~300点の沿岸セットに差し替える。
-# ※ 必ず「海」セル上に置くこと。陸なら下の自動チェックでスキップされる。
 RELEASE_SITES = [
-    (129.5, 34.0),   # 対馬海峡付近
-    (135.0, 34.0),   # 紀伊水道
-    (140.0, 35.0),   # 房総沖
-    (141.5, 38.5),   # 三陸沖
-    (133.0, 36.5),   # 山陰沖
-    (126.5, 33.5),   # 済州島南
-    (122.5, 31.0),   # 長江河口沖
-    (120.5, 28.0),   # 東シナ海
-    (128.0, 30.0),   # 奄美近海
-    (138.0, 33.0),   # 遠州灘沖
+    (129.5, 34.0),   
+    (135.0, 34.0),   
+    (140.0, 35.0),   
+    (141.5, 38.5),   
+    (133.0, 36.5),   
+    (126.5, 33.5),   
+    (122.5, 31.0),   
+    (120.5, 28.0),   
+    (128.0, 30.0),   
+    (138.0, 33.0),   
 ]
 
-# =====================================================================
 # 1. GLORYS を開いて座標・land mask・表層深度を取得
-# =====================================================================
 print("[1] loading GLORYS ...")
 ds0 = xr.open_dataset(GLORYS_FILE)
 lons = ds0[DIM_LON].values
@@ -72,9 +60,7 @@ if lats[0] > lats[-1]:
     lats = lats[::-1]
     land = land[::-1, :]
 
-# =====================================================================
 # 2. FieldSet 構築 + land mask を単位変換なしの別フィールドとして追加
-# =====================================================================
 print("[2] building fieldset ...")
 filenames  = {"U": GLORYS_FILE, "V": GLORYS_FILE}
 variables  = {"U": VAR_U, "V": VAR_V}
@@ -91,9 +77,7 @@ lmask = Field("landmask", land, lon=lons, lat=lats, mesh="flat",
               interp_method="nearest")
 fieldset.add_field(lmask)
 
-# =====================================================================
 # 3. 放流地点を海セルに限定し、ジッタを付けて粒子配列を生成
-# =====================================================================
 def nearest(arr, v):
     return int(np.abs(arr - v).argmin())
 
@@ -110,9 +94,7 @@ for k, (lo, la) in enumerate(RELEASE_SITES):
 plon = np.array(plon); plat = np.array(plat); porigin = np.array(porigin, np.int32)
 print(f"[3] releasing {plon.size} particles from {len(set(porigin))} ocean sites")
 
-# =====================================================================
 # 4. 粒子クラス + カーネル (合成フィールドで検証済み)
-# =====================================================================
 class Plastic(JITParticle):
     beached  = Variable("beached",  dtype=np.int32,   initial=0)
     prev_lon = Variable("prev_lon", dtype=np.float32, initial=0.)
@@ -151,9 +133,7 @@ def Recover(particle, fieldset, time):              # 領域外/補間エラー�
         particle.beached = 1
         particle.state = StatusCode.Success
 
-# =====================================================================
 # 5. 実行
-# =====================================================================
 print("[5] running simulation ...")
 pset = ParticleSet(fieldset, pclass=Plastic,
                    lon=plon, lat=plat,
@@ -165,9 +145,7 @@ pset.execute([StorePrev, AdvectBeach, BeachOnLand, Recover],
              dt=timedelta(minutes=DT_MIN),
              output_file=pfile)
 
-# =====================================================================
-# 6. 後処理: 軌跡 → 漂着密度マップ (前方タスクの教師データ1枚を実際に作る)
-# =====================================================================
+# 6. 後処理: 軌跡 → 漂着密度マップ 
 print("[6] building beaching-density map ...")
 ds = xr.open_zarr(OUT_ZARR)
 flon = ds.lon.isel(obs=-1).values
@@ -186,9 +164,7 @@ if H.sum() > 0:
     H = H / H.sum()
 np.save("beaching_density_origin0.npy", H)
 
-# =====================================================================
-# 7. 合否チェック — ここが全部 OK なら本番バッチへ進んでよい
-# =====================================================================
+# 7. 合否チェック 
 start_lon = ds.lon.isel(obs=0).values
 disp = np.hypot(flon - start_lon, flat - ds.lat.isel(obs=0).values)
 print("\n===== PASS CHECK =====")
@@ -204,7 +180,6 @@ if beached.mean() > 0.99:
     print("  !! 即死の可能性 → land mask の向き(lat昇降)を疑う")
 print("======================")
 
-# 任意: 目視用のクイックプロット
 try:
     import matplotlib
     matplotlib.use("Agg")

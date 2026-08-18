@@ -1,11 +1,6 @@
-"""
-TRACE — 逆モデル(Attention U-Net)の訓練ループ
 
-forward/train.pyと同じ構造。CONFIGの初期値もforwardで実験して見つけた
-ベスト設定(LR=3e-3, weight_decay=1e-3, cross_entropy, dropout無し)を
-そのまま出発点にしている。ただしタスクが違う(観測点→責任マップ)ので
-この値が逆モデルにも最適とは限らない。再チューニングは別途行う。
-"""
+# 逆モデル(Attention U-Net)の訓練ループ
+
 
 from pathlib import Path
 
@@ -16,19 +11,17 @@ from dataset import BackwardDataset, load_coastal_mask
 from main import AttentionUNet
 from losses import cross_entropy_loss, weighted_mse_loss
 
-# =====================================================================
 # CONFIG — forwardのベスト設定を初期値として流用(要再チューニング)
-# =====================================================================
 SEED = 42
 BATCH_SIZE = 16
 LR = 3e-3
-WEIGHT_DECAY = 1e-5        # bexp04: sweepで最良(forwardの1e-3はむしろ悪化した)
+WEIGHT_DECAY = 1e-5        
 EPOCHS = 100
-IN_CH = 3                  # [観測点ガウシアン, 平均u, 平均v]
+IN_CH = 3 # [観測点ガウシアン, 平均u, 平均v]
 BASE_CH = 32
 DROPOUT_P = 0.0
-LOSS_FN = "cross_entropy"  # "weighted_mse" or "cross_entropy"
-ALPHA = 5.0                # weighted_mse用の非ゼロ画素の重み
+LOSS_FN = "cross_entropy" # "weighted_mse" or "cross_entropy"
+ALPHA = 5.0 # weighted_mse用の非ゼロ画素の重み
 PATIENCE = 15
 USE_SCHEDULER = False
 SCHED_FACTOR = 0.5

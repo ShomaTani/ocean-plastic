@@ -1,10 +1,6 @@
-"""
-TRACE — bexp03: 逆モデル用のLR再探索
 
-forwardのベスト値(LR=3e-3)をそのまま流用しているが、逆モデルは問題の構造が
-違う(bexp01/02参照)ので、最適なLRも違う可能性がある。forward/sweep_lr.pyと
-同じやり方でtrain.pyのCONFIG(LR以外)を固定して複数候補を比較する。
-"""
+# bexp03: 逆モデル用のLR再探索
+
 
 import shutil
 from pathlib import Path

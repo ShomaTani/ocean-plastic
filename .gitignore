@@ -38,3 +38,4 @@ venv/
 # ===== OS / エディタ =====
 .DS_Store
 .vscode/
+.claude/

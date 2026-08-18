@@ -1,9 +1,6 @@
-"""
-TRACE — 逆モデルのテストセットでの最終評価
 
-train.pyでのhyperparameter選びには一切使っていないtest split(観測セル)に対して、
-best_model.ptを1回だけ評価する。
-"""
+# 逆モデルのテストセットでの最終評価
+
 
 import numpy as np
 import torch
@@ -34,9 +31,8 @@ with torch.no_grad():
 print(f"test weighted_mse : {total_mse / n:.6f}")
 print(f"test cross_entropy: {total_ce / n:.6f}")
 
-# =====================================================================
 # 目視確認用: test set全地点で 入力(観測点)/予測(責任マップ)/正解 を並べて保存する
-# =====================================================================
+
 import matplotlib.pyplot as plt
 
 x_all, y_all, valid_all = next(iter(DataLoader(test_ds, batch_size=len(test_ds))))

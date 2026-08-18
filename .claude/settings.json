@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python3 -c ' *)",
-      "Bash(time python sim_main.py 2018-01-01)"
-    ]
-  }
-}

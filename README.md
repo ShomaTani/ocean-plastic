@@ -19,9 +19,7 @@ Streamlitのアプリをローカルで動かすには
    - `data/current_field.npz`, `data/current_field_2018-01-01.npz` 〜 `2022-01-01.npz`
    - `forward/best_model.pt`, `backward/best_model.pt`
 
-   これらは`.gitignore`で除外されているため、GLORYS/ERA5の生データダウンロードや
-   シミュレーション・学習を一切やり直さずに再現したい場合は、force-addして
-   リポジトリに含めておく必要がある(現状は`forward/best_model.pt`のみ追跡済み)。
+   これらは`.gitignore`で除外されているため、GLORYS/ERA5の生データダウンロードやシミュレーション・学習を一切やり直さずに再現したい場合は、force-addしてリポジトリに含めておく必要がある(現状は`forward/best_model.pt`のみ追跡済み)。
 
 3. 起動
    ```
@@ -29,8 +27,7 @@ Streamlitのアプリをローカルで動かすには
    ```
    ブラウザで `http://localhost:8501` が開く。
 
-上記2のファイルさえあれば、GLORYS/ERA5の生データダウンロードやCMEMS/CDSの
-認証情報は一切不要(Streamlitの推論は学習済みモデルと海流場ファイルだけで完結する)。
+上記2のファイルさえあれば、GLORYS/ERA5の生データダウンロードやCMEMS/CDSの認証情報は一切不要(Streamlitの推論は学習済みモデルと海流場ファイルだけで完結する)。
 無い場合は `data/` 以下のパイプラインを先頭から実行して再生成する必要がある
 (`sim_main.py` → `build_current_field.py` → `inputdata_dim.py`/`build_backward_pairs.py`
 → `make_split.py`/`make_split_backward.py` → `forward/train.py`/`backward/train.py`)。

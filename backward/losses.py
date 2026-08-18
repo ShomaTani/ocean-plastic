@@ -1,10 +1,5 @@
-"""
-TRACE — 逆モデル用 Loss
+# 逆モデル用 Loss
 
-forward/losses.pyと完全に同じ関数をそのまま使う(「責任マップ」も合計1の
-確率分布として比較する構造は順モデルと同じなので、ロジック自体は共通)。
-main.pyと同じ理由(ファイル名衝突)でimportlib経由で読み込む。
-"""
 
 import importlib.util
 from pathlib import Path

@@ -1,8 +1,6 @@
-"""
-TRACE — bexp04: 逆モデル用のweight decay再探索
 
-forward/sweep_wd.pyと同じやり方。LRはbexp03で確定(3e-3のまま)。
-"""
+# bexp04: 逆モデル用のweight decay再探索
+
 
 import shutil
 from pathlib import Path

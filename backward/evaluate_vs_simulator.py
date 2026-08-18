@@ -1,13 +1,9 @@
 """
-TRACE — 逆モデルのシミュレータに対する精度を、レポートで説明しやすい
-物理量(km, %)で定量化する。forward/evaluate_vs_simulator.pyと同じ発想。
+逆モデルのシミュレータに対する精度を、レポートで説明しやすい物理量(km, %)で定量化。
 
   centroid_distance_km : 予測した責任マップPと正解の責任マップYの
                           確率重み付き重心同士の距離(km)
   total_variation       : 0.5 * sum(|P - Y|)。0=完全一致, 1=完全不一致
-
-test split(observation cellsのうち45セル程度)で評価する。backward_pairs.npz
-の構成上、全セルY.sum()==1が保証されているのでzero-beach相当の除外は不要。
 """
 
 import numpy as np

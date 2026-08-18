@@ -1,5 +1,5 @@
 """
-TRACE — 逆モデル用 Dataset
+逆モデル用 Dataset
 
 ../data/backward_pairs.npz (観測地点ごとのX_gaussian, Y, split) と
 ../data/current_field.npz (forward/dataset.pyと同じ、全site共通のu, v) を読み込み、
@@ -23,10 +23,6 @@ DEFAULT_CURRENT_NPZ = DATA_DIR / "current_field.npz"
 
 
 def load_coastal_mask(current_npz_path=DEFAULT_CURRENT_NPZ):
-    """originは必ず沿岸(陸に接した海セル)のはず(release_site.pyがland maskから
-    沿岸セルだけを抽出して300地点を作っている)。このmaskをmasked softmaxに使うと、
-    モデルが非沿岸セルに確率を漏らせなくなる(predict_point.pyで発見した問題への対応)。
-    戻り値は(128,128)のbool tensor、Trueが「確率を置いてよいセル」。"""
     from scipy.ndimage import binary_dilation
 
     c = np.load(current_npz_path)

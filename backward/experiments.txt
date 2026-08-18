@@ -122,4 +122,30 @@ bexp08 — データ増量(forward exp11/exp12と同じシミュレーション�
         確率漏れ」が解消されていたため、順モデルほど劇的な改善は見られなかった。
         データ増量の恩恵は主に順モデルのハルシネーション対策として大きかった。
 
-(以降、この下に追記していく)
+bexp09 — 季節データ拡張(forward exp13と同じ5年分の冬データに追従)
+  背景: forward/experiments.txt exp13参照。全site共通の放出時刻が実は2018-01-01固定
+        だったと判明し、2018-2022年の各1/1起点で5回シミュレーションを再実行、
+        current_fieldも放出日ごとに分けた
+  対応: build_backward_pairs.pyを放出日ごとに転置処理を行い連結するよう修正
+        (site×dateならぬcell×dateの連結、3806行)。make_split_backward.pyは
+        (row,col)単位でユニーク化してからeasy/hard分類・クラスタリング・分割する
+        よう修正(同じ観測セルが年によってn_origins=1/2以上と変わりうるため、
+        5年間で一度でもn_origins>=2だったセルはhardプール優先で分類し、
+        同じセルの異なる年がtrain/testにまたがらないようにした)。backward/dataset.py
+        もforward同様、日付ごとのcurrent_field_{date}.npzを引けるよう修正
+  config: bexp08がベース(seed=42, LR=3e-3, WEIGHT_DECAY=1e-5, IN_CH=3, BASE_CH=32,
+          LOSS_FN=cross_entropy, DROPOUT_P=0.0, masked softmax dilation=1)。
+          変えたのはデータのみ
+  データ: train 3117行(816 unique cells) / val 486行(124 cells) / test 203行(45 cells)
+  結果: 24epochで早期終了。best val=2.822843(epoch9時点、train@best=2.654582、
+        gap=0.168261)
+  比較: bexp08(単一シーズン)のbest val=2.951676, gap=0.696292に対し、val loss改善
+        (2.952→2.823)、train-valギャップも大幅改善(0.696→0.168、約1/4に縮小)
+  判断: 季節データ拡張は逆モデルの過学習抑制に明確に効いた。forward側(exp13)では
+        同じ拡張がむしろgapを悪化させたのと対照的。原因は出力構造の違いと考えられる:
+        順モデルの出力(密度分布)は年によって鋭く変わりうる生の正解を直接
+        当てさせるのに対し、逆モデルの出力(責任マップ)は元からガウシアンぼかし
+        (bexp02)で滑らかにしてあるため、年ごとのばらつきが「曖昧さの増加」では
+        なく「頑健性の向上」として素直に効いたと解釈できる。採用、以降このモデルを
+        ベースにする
+

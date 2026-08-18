@@ -3,7 +3,7 @@ TRACE — 逆モデル(Attention U-Net)の訓練ループ
 
 forward/train.pyと同じ構造。CONFIGの初期値もforwardで実験して見つけた
 ベスト設定(LR=3e-3, weight_decay=1e-3, cross_entropy, dropout無し)を
-そのまま出発点にしている。ただしタスクが違う(観測点→責任マップ)ので、
+そのまま出発点にしている。ただしタスクが違う(観測点→責任マップ)ので
 この値が逆モデルにも最適とは限らない。再チューニングは別途行う。
 """
 

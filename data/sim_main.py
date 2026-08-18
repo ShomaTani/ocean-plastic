@@ -12,6 +12,7 @@ RUNTIME_DAYS を増やすだけでそのままスケールする。
 依存: pip install parcels xarray zarr netcdf4   (matplotlib は任意)
 """
 
+import sys
 import math
 import numpy as np
 import xarray as xr
@@ -41,7 +42,18 @@ OUTPUT_DT_H  = 24      # 軌跡を何時間ごとに保存するか
 N_PER_SITE   = 200     # 1放流地点あたりの粒子数(50→200、密度マップを滑らかにするため)
 JITTER_DEG   = 0.05    # 各地点まわりに粒子を散らす幅(度)
 GRID_N       = 128     # 密度マップの解像度 (最終的な NN 入出力に合わせる)
-OUT_ZARR     = "trace_run.zarr"
+
+# 放出開始日: 季節データ拡張のため、複数の年で同じ暦日(例: 各年1/1)から
+# 走らせられるよう、CLI引数で上書きできるようにしてある。
+# 使い方: python sim_main.py [YYYY-MM-DD]  (省略時は2018-01-01=既存の挙動と同じ)
+RELEASE_DATE = sys.argv[1] if len(sys.argv) > 1 else "2018-01-01"
+RELEASE_TIME = np.datetime64(RELEASE_DATE)
+
+# 出力ファイルは放出日をサフィックスして複数年分を共存させる
+OUT_ZARR           = f"trace_run_{RELEASE_DATE}.zarr"
+DENSITY_ALL_NPY    = f"density_maps_all_{RELEASE_DATE}.npy"
+DENSITY_BEACH_NPY  = f"density_maps_beach_{RELEASE_DATE}.npy"
+print(f"    release date: {RELEASE_DATE}  (out: {OUT_ZARR})")
 
 # 放流地点: gen_release_sites.py が出力した CSV から読み込む
 # (陸マス上の点は自動生成の時点で既に除外済みなので、ここでの
@@ -227,6 +239,7 @@ pwindage = rng.uniform(WINDAGE_MIN, WINDAGE_MAX, plon.size).astype(np.float32)
 pset = ParticleSet(fieldset, pclass=Plastic,
                    lon=plon, lat=plat,
                    depth=np.full(plon.size, depth0),
+                   time=np.full(plon.size, RELEASE_TIME),
                    origin=porigin,
                    windage=pwindage)
  
@@ -303,10 +316,10 @@ for k in range(n_sites):
     # sel_b が0件(90日でも漂着なし)の origin はゼロ配列のまま
     # → 学習時にこの origin をどう扱うかは別途要検討(サンプル除外 or 明示フラグ)
  
-np.save("density_maps_all.npy", maps_all)       # shape: (n_sites, GRID_N, GRID_N)
-np.save("density_maps_beach.npy", maps_beach)   # shape: (n_sites, GRID_N, GRID_N)
-_sites_df.to_csv("release_sites_used.csv", index=False)  # origin index との対応表
-print(f"    saved density_maps_all.npy / density_maps_beach.npy  "
+np.save(DENSITY_ALL_NPY, maps_all)       # shape: (n_sites, GRID_N, GRID_N)
+np.save(DENSITY_BEACH_NPY, maps_beach)   # shape: (n_sites, GRID_N, GRID_N)
+_sites_df.to_csv("release_sites_used.csv", index=False)  # origin index との対応表(全放出日で共通)
+print(f"    saved {DENSITY_ALL_NPY} / {DENSITY_BEACH_NPY}  "
       f"shape={maps_all.shape}")
 print(f"    mean beached fraction (領域内粒子中)     : {beach_frac_by_site.mean():.2f}")
 print(f"    mean left_domain fraction (領域外離脱)   : {left_domain_frac_by_site.mean():.2f}")
@@ -375,7 +388,7 @@ try:
     plt.suptitle(f"origin {plot_origin} (n_particles={n_particles_by_site[plot_origin]}): "
                 f"all vs. beached-only density")
     plt.tight_layout()
-    plt.savefig("density_origin_check.png", dpi=110)
-    print(f"saved density_origin_check.png (origin={plot_origin})")
+    plt.savefig(f"density_origin_check_{RELEASE_DATE}.png", dpi=110)
+    print(f"saved density_origin_check_{RELEASE_DATE}.png (origin={plot_origin})")
 except Exception as e:
     print("plot skipped:", e)

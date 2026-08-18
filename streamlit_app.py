@@ -66,11 +66,24 @@ def load_side(dir_name):
     }
 
 
+SEASON_BASELINE_LABEL = "5年平均(季節性を無視した旧基準)"
+
+
+def discover_current_dates():
+    """data/ にある current_field_{date}.npz を全て探して日付リストを返す(新しい順)。
+    季節データ拡張(sim_main.py <date> → build_current_field.py <date>)で放出日を
+    追加したら、ここは変更不要でそのまま選択肢に増える。"""
+    files = sorted(DATA_DIR.glob("current_field_*.npz"))
+    dates = [f.stem.replace("current_field_", "") for f in files]
+    return sorted(dates, reverse=True)
+
+
 @st.cache_resource
-def load_grid():
-    """GLORYS生データは開かず、current_field.npz(既に128x128に整形済み)と
-    確定済みのドメイン範囲(東経120-150, 北緯25-50)だけで完結させる。"""
-    c = np.load(DATA_DIR / "current_field.npz")
+def load_grid(current_file_name):
+    """GLORYS生データは開かず、current_field*.npz(既に128x128に整形済み)と
+    確定済みのドメイン範囲(東経120-150, 北緯25-50)だけで完結させる。
+    current_file_nameで「どの放出日(年)の海流場を使うか」を切り替えられる。"""
+    c = np.load(DATA_DIR / current_file_name)
     land_mask = c["land_mask"]
     coastal_mask = binary_dilation(land_mask) & ~land_mask
     gx = np.linspace(120.0, 150.0, GRID_N + 1)
@@ -311,7 +324,21 @@ mode_label = st.radio(
 mode = "forward" if mode_label.startswith("順") else "backward"
 st.markdown('<div class="header-spacer"></div>', unsafe_allow_html=True)
 
-grid = load_grid()
+available_dates = discover_current_dates()
+date_options = available_dates + [SEASON_BASELINE_LABEL]
+selected_date = st.selectbox(
+    "海流条件(放出日)",
+    date_options,
+    index=0,
+    help="どの年の冬(1月1日起点、90日間)の海流場で推論するか選べます。"
+         f"「{SEASON_BASELINE_LABEL}」は季節データ拡張前の2018-2022年5年間の静的平均です。"
+         "sim_main.py <date> と build_current_field.py <date> を実行すれば選択肢を追加できます。",
+)
+current_file = (
+    "current_field.npz" if selected_date == SEASON_BASELINE_LABEL
+    else f"current_field_{selected_date}.npz"
+)
+grid = load_grid(current_file)
 
 st.caption("地図をクリックして沿岸の地点を選択")
 

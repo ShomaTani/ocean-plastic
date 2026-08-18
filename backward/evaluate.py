@@ -2,7 +2,7 @@
 TRACE — 逆モデルのテストセットでの最終評価
 
 train.pyでのhyperparameter選びには一切使っていないtest split(観測セル)に対して、
-best_model.pt を1回だけ評価する。
+best_model.ptを1回だけ評価する。
 """
 
 import numpy as np

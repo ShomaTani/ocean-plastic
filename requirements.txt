@@ -1,0 +1,39 @@
+# TRACE — 依存パッケージ一覧
+# 動作確認済み環境: conda env "plastic", Python 3.11.15
+#   conda create -n plastic python=3.11
+#   conda activate plastic
+#   pip install -r requirements.txt
+
+
+# ===== シミュレーション (data/sim_main.py 等) =====
+parcels==3.1.4
+xarray==2026.4.0
+zarr==2.18.7
+netCDF4==1.7.4
+numpy==2.4.6
+scipy==1.17.1
+pandas==2.3.3
+
+# ===== 学習・推論 (forward/, backward/) =====
+torch==2.12.1
+scikit-learn==1.9.0
+matplotlib==3.11.0
+
+# ===== Streamlitアプリの実行に必要 (streamlit_app.py) =====
+streamlit==1.38.0
+streamlit-image-coordinates==0.4.0
+Pillow==10.4.0
+# streamlit-image-coordinates は新しいstreamlitと非互換のため、
+# streamlitのバージョンをこの値に固定すること(CLAUDE.md §5参照)
+
+# ===== 生データ取得のみに必要 (data/era5_download.py 等) =====
+# シミュレーション・学習・Streamlit実行には不要。GLORYS/ERA5を
+# 新規ダウンロードする場合のみ必要で、別途認証情報(.cdsapirc等)の設定も要る。
+cdsapi==0.7.7
+copernicusmarine==2.4.1
+
+# ===== 未使用・検証用 (data/test.py) =====
+# plasticparcelsは検討した結果不採用(CLAUDE.md §5参照)。
+# data/test.pyがバージョン確認のためにimportしているだけで、
+# 本番のパイプラインでは使われていない。無くても他は動く。
+plasticparcels==0.3.1

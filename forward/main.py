@@ -5,13 +5,6 @@ import torch.nn as nn
 
 
 class ConvBlock(nn.Module):
-    """Conv2d -> BatchNorm -> ReLU を2回。U-Netのどの段階でも使い回す基本単位。
-    解像度は変えない(kernel=3, padding=1で入出力サイズを揃える)。
-    解像度を変えるのはDownSample/UpSampleの役目。
-
-    dropout_p>0 なら最後にnn.Dropout2dを足す(過学習対策、exp09)。
-    per-pixelのDropoutと違い、Dropout2dはchannelごと丸ごと落とす
-    (=特徴マップの空間構造を保ったまま、頼る特徴を絞る)。"""
 
     def __init__(self, in_ch, out_ch, dropout_p=0.0):
         super().__init__()
@@ -32,8 +25,6 @@ class ConvBlock(nn.Module):
 
 
 class DownSample(nn.Module):
-    """ConvBlock -> MaxPool2d(2) で解像度を半分にする。
-    pool前のskip(高解像度)とpool後(次のdown層への入力)の両方を返す。"""
 
     def __init__(self, in_ch, out_ch, dropout_p=0.0):
         super().__init__()
@@ -47,8 +38,6 @@ class DownSample(nn.Module):
 
 
 class AttentionGate(nn.Module):
-    """g(decoderの粗い特徴=gating signal)とx(encoderのskip特徴)を見て、
-    xのどこを重視すべきかを表すalpha(0~1)を学習し、x*alphaを返す。"""
 
     def __init__(self, g_ch, x_ch, inter_ch):
         super().__init__()
@@ -75,8 +64,6 @@ class AttentionGate(nn.Module):
 
 
 class UpSample(nn.Module):
-    """ConvTranspose2dで解像度を2倍に戻す(同時にchannelを半分にする)
-    -> AttentionGateでskipをフィルター -> concat -> ConvBlock"""
 
     def __init__(self, in_ch, skip_ch, out_ch, dropout_p=0.0):
         super().__init__()
@@ -94,13 +81,8 @@ class UpSample(nn.Module):
 class AttentionUNet(nn.Module):
     """down x4 -> ConvBlock(bottleneck) -> up x4(各段でAttentionGate)
     -> 1x1 Convで出力チャンネルを1に落とす。
-
-    base_ch=32 とやや小さめにしてあるのは、train ~240枚に対して
-    デフォルトの64chだとパラメータ数が過剰で過学習しやすいため。
-
-    forwardの戻り値はロジット(生の値、活性化なし)。sigmoidやsoftmaxを
-    ここでかけないのは、どのlossを使うか(softmax+KL か 重み付きMSE か)
-    によって最終層の扱いが変わるため、モデルとlossの責務を分けてある。"""
+    loss functionによる柔軟性確保のためforwardの戻り値はロジット(生の値、活性化なし)。
+    """
 
     def __init__(self, in_ch=1, out_ch=1, base_ch=32, dropout_p=0.0):
         super().__init__()

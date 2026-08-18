@@ -1,20 +1,7 @@
 """
-TRACE — 順モデルのシミュレータに対する精度を、レポートで説明しやすい
+順モデルのシミュレータに対する精度を、レポートで説明しやすい
 物理量(km, %)で定量化する。
-
-cross_entropy/weighted_mse の値自体は絶対値としての解釈が難しい(値の大小に
-直感的な意味が無い)ため、以下の2指標を追加する:
-
-  centroid_distance_km : 予測分布Pと正解分布Yの「確率重み付き重心」同士の
-                          距離(km)。「平均してどれくらいズレた場所を中心に
-                          予測しているか」を表す、最も直感的な1つの数字。
-  total_variation       : 0.5 * sum(|P - Y|)。0=完全一致, 1=完全に不一致
-                          (質量が重ならない)。「予測の何%が正解と噛み合って
-                          いないか」を表す。
-
-test split(train.pyのhyperparameter選びに一切使っていない17〜28地点)でのみ
-評価する。zero-beach(90日間漂着なし)のoriginは正解の重心が定義できないため
-centroid_distanceの集計からは除外する(total_variationには含める)。
+指標はbakcward/evaluate_vs_simulator.pyと同じ
 """
 
 import numpy as np

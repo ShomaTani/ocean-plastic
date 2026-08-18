@@ -1,11 +1,7 @@
-"""
-TRACE — exp05: cross_entropy用のLR再探索
 
-exp04はweighted_mse用に決めたLR=1e-3をそのまま使い回しただけなので、
-cross_entropy向けに複数のLRを試して比較する。train.pyのCONFIG(LR以外)は
-そのまま固定して使う。checkpointは候補ごとに別名で保存し、最良のものだけ
-最後にbest_model.ptとしてコピーする。
-"""
+# exp05: cross_entropy用のLR再探索
+
+
 
 import shutil
 from pathlib import Path

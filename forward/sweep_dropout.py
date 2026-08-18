@@ -1,10 +1,6 @@
-"""
-TRACE — exp09: Dropout2dを探索
 
-exp08(weight_decay=1e-3)でgapは1.78->0.50まで縮んだが、まだtrain<valの余地はある。
-ConvBlock末尾のDropout2dを何段階か試して、weight_decayと併用した効果を見る。
-train.pyのCONFIG(DROPOUT_P以外、WEIGHT_DECAY=1e-3含む)は固定。
-"""
+# exp09: Dropout2dを探索
+
 
 import shutil
 from pathlib import Path

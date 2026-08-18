@@ -1,9 +1,6 @@
-"""
-TRACE — 順モデル(Attention U-Net)の訓練ループ
 
-CONFIGの値(BATCH_SIZE, LR, EPOCHS, ALPHA等)は暫定値。チューニングは別途行う。
-LOSS_FN で cross_entropy / weighted_mse を切り替えられるようにしてある。
-"""
+# 順モデル(Attention U-Net)の訓練ループ
+
 
 from pathlib import Path
 
@@ -14,10 +11,8 @@ from dataset import TraceDataset, load_coastal_mask
 from main import AttentionUNet
 from losses import cross_entropy_loss, weighted_mse_loss
 
-# =====================================================================
-# CONFIG — 暫定値
-# =====================================================================
-SEED = 42                  # 実験間で初期値・shuffleを揃えて比較できるようにする
+# CONFIG 
+SEED = 42                  
 BATCH_SIZE = 16
 LR = 3e-3                  # exp05: LR sweep(3e-4,1e-3,3e-3,1e-2)で最良だった値
 WEIGHT_DECAY = 1e-3        # exp08: sweepで最良(val 3.058->2.965, gap 1.78->0.50)

@@ -1,9 +1,5 @@
-"""
-TRACE — テストセットでの最終評価
 
-train.pyでのhyperparameter選び(loss, epoch数等)には一切使っていない
-test split(17地点)に対して、best_model.pt を1回だけ評価する。
-"""
+# テストセットでの最終評価
 
 import numpy as np
 import torch
@@ -34,9 +30,7 @@ with torch.no_grad():
 print(f"test weighted_mse : {total_mse / n:.6f}")
 print(f"test cross_entropy: {total_ce / n:.6f}")
 
-# =====================================================================
 # 目視確認用: test set全地点で 入力/予測/正解 を並べて保存する
-# =====================================================================
 import matplotlib.pyplot as plt
 
 x_all, y_all, valid_all = next(iter(DataLoader(test_ds, batch_size=len(test_ds))))

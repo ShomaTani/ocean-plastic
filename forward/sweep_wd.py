@@ -1,10 +1,5 @@
-"""
-TRACE — exp08: weight decay(Adamの重み減衰、L2正則化)を探索
 
-exp05以降ずっとtrain lossがval lossよりかなり低い(過学習気味)状態が続いている。
-weight_decayを何段階か試して、best_valとtrain-valのgapがどう変わるか比較する。
-train.pyのCONFIG(WEIGHT_DECAY以外)は固定。
-"""
+#exp08: weight decay(Adamの重み減衰、L2正則化)を探索
 
 import shutil
 from pathlib import Path
